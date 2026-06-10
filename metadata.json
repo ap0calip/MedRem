@@ -1,0 +1,6 @@
+{
+  "name": "MedRed",
+  "description": "A personal medication reminder application designed to help users track their own medications or those of family members.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
