@@ -1,6 +1,6 @@
 # Technical Specification: MedRed (Medication Reminder Application)
 
-Welcome to the **MedRed Technical Specification**. This document outlines the technical design, system architecture, database schema, background scheduling model, and user interface layouts of the MedRed application. MedRed is a production-ready Android-based personal and family medication reminder application built with Jetpack Compose, Room DB, and Android’s native AlarmManager system.
+Welcome to the **MedRed Technical Specification**. This document outlines the system philosophy, database schema, background scheduling model, exact alarm protocols, and user interface traits of the MedRed application.
 
 ---
 
@@ -8,7 +8,7 @@ Welcome to the **MedRed Technical Specification**. This document outlines the te
 The key objective of MedRed is to provide an **offline-first, zero-latency, high-precision medication scheduling machine** that caters to both individuals and multi-member households. 
 *   **Privacy & Local Preservation**: All profiles, medications, schedules, and compliance intake logs are saved locally using an embedded SQLite engine via Room. No profile data ever leaves the device.
 *   **Battery-Efficient Dispatch**: Utilizes precise wake alarms (`AlarmManager`) mapped directly to targeted system intent broadcasts to wake up the application only when a target dose window is reached.
-*   **Intent-Driven Filtering**: An ergonomic, responsive single-screen dashboard layout that allows the user to filter all medicine schedules and compliance statistics by profile tags at a single click.
+*   **Intent-Driven Filtering & Search**: An ergonomic, responsive single-screen dashboard layout that allows the user to search all active medication schedules and historical compliance statistics by profile tags and search keywords simultaneously.
 
 ---
 
@@ -22,7 +22,7 @@ The key objective of MedRed is to provide an **offline-first, zero-latency, high
 ---
 
 ## 3. Database Schema (SQLite / Room)
-The application defines three main database tables mapped directly to Room Entity wrappers under `com.example.data.entity`:
+The application defines three main database tables mapped directly to Room Entity wrappers under `com.example.data.entity`. The schema version is `3`.
 
 ### A. `family_members`
 Holds individual user profiles. Each profile represents the patient details.
@@ -62,7 +62,9 @@ data class Medication(
     val startTime: String, // format "HH:mm" (24h format, e.g., "08:30")
     val startDate: Long, // Epoch timestamp (epoch millis) representing start date
     val familyMemberId: Long,
-    val isActive: Boolean = true
+    val isActive: Boolean = true,
+    val snoozedUntil: Long = 0L,
+    val lastLoggedTime: Long = 0L
 )
 ```
 
@@ -84,58 +86,16 @@ data class DoseRecord(
 
 ---
 
-## 4. Architectural Layers (MVVM Model)
-
-The application adheres directly to standard Android MVVM architecture guidelines:
-
-```
-┌────────────────────────────────────────────────────────┐
-│                      Compose UI                        │
-│   Dashboard (MainActivity) ◄──► Dialog Modules / Cards │
-└───────────▲────────────────────────────────▲───────────┘
-            │                                │ Observe
-            │ Events / Commands              │ State Flows
-┌───────────▼────────────────────────────────┴───────────┐
-│                    ViewModel                           │
-│   Exposes: filteredMedications, familyMembers, etc.     │
-└───────────▲────────────────────────────────────────────┘
-            │ Handles logic and routes updates
-┌───────────▼────────────────────────────────────────────┐
-│                    Repository                          │
-│   Coordinates Local DB access and Alarm Scheduler API  │
-└───────────▲────────────────────────────────────────────┘
-            │ Core Queries / Room Mutations
-┌───────────▼────────────────────────────────────────────┐
-│                     Local DB                           │
-│   Room Database Engine ◄──► SQLite File Store          │
-└────────────────────────────────────────────────────────┘
-```
-
-### Layers Description:
-1.  **Data Layer (`com.example.data`)**:
-    *   **Dao (`AppDao`)**: Declares Room DAO methods. Returns standard asynchronous `Flow<List<T>>` for list responses, granting the UI automatic live-updates upon database mutation.
-    *   **Database (`AppDatabase`)**: Extends `RoomDatabase`. Pre-populates a default profile "Me" (with dynamic styling) on first creation if dry-launched.
-    *   **Repository (`MedicationRepository`)**: Aggregates Dao instructions. Houses logic to register and unregister exact alarm system configurations when inserting or updating medications.
-2.  **Scheduling/Reminder Layer (`com.example.reminder`)**:
-    *   **`ReminderScheduler`**: Formulates calculations to map current time, weekly/interval constraints, and scheduled start offsets to target millisecond epochs. Communicates directly with the Android SDK’s `AlarmManager`.
-    *   **`MedicationAlarmReceiver`**: Receives target alarm dispatches. Coordinates the event pipeline by routing intent deliverables directly to the `MedicationAlarmService` (Foreground Service) for continuous execution.
-    *   **`MedicationAlarmService`**: Android Foreground Service which instantiates a persistent background loop. Leverages standard Android background constraints by executing a foreground worker containing a `MediaPlayer` managing an active alarm ringtone stream. It utilizes a `NotificationChannel` configured with `IMPORTANCE_HIGH` that encapsulates a `fullScreenIntent` pointing directly to the wake-screen component.
-    *   **`AlarmActivity`**: Full-screen overlay activity configured with window bypass parameters like `setShowWhenLocked(true)` and `setTurnScreenOn(true)`. Leveraging the `USE_FULL_SCREEN_INTENT` permission, this activity directly bypasses keyguards on standby states to present a prominent high-contrast interactive patient HUD.
-    *   **`BootReceiver`**: Automatically invoked when of Android's `ACTION_BOOT_COMPLETED` triggers. Re-initiates database-driven background registrations to preserve alarm survival over phone shutdowns.
-3.  **UI & State Layer (`com.example.viewmodel` / `com.example.ui`)**:
-    *   **`MedicationViewModel`**: Binds queries together. Exposes safe state flows leveraging reactive transformations. Listens directly to query searches and profile navigation selections.
+## 4. Architectural Layers
+The codebase adheres directly to the Android MVVM pattern, separating the application logic into layers. To see a detailed design and system visualization of these layers, please refer to `/LAYER_SPECIFICATION.md`.
 
 ---
 
 ## 5. Alarm Scheduling Calculations & Precision
-
 To optimize battery life while maintaining reliable trigger precision, MedRed implements exact scheduling offsets:
 
 ### A. Weekly Schedule Method
-Target hours and minutes are calculated based on user input. The application calculates the closest upcoming calendar day matching the selected active days list (e.g. `Mon`, `Wed`, `Fri`) starting from the baseline time:
-1. Parse the customized HH:mm string (e.g. `"08:30"` -> Hour `8`, Minute `30`).
-2. Construct a calendar baseline. If the scheduled time on a target day has passed for today, the scheduler advances to the next week.
-3. Compute matching calendar offsets and schedule individual intent callbacks using `AlarmManager.setExactAndAllowWhileIdle`.
+Target hours and minutes are calculated based on user input. The application calculates the closest upcoming calendar day matching the selected active days list (e.g. `Mon`, `Wed`, `Fri`) starting from the baseline time.
 
 ### B. Interval Schedule Method
 For periodic medications (e.g., *"Take every 8 hours"*):
@@ -143,60 +103,34 @@ For periodic medications (e.g., *"Take every 8 hours"*):
 2. Modulate the difference by the interval duration sequence.
 3. Set the target notification trigger index at the exact next upcoming modulo threshold.
 
-### C. OS-Level Intent Payload Architecture
-Each alarm is assigned a unique Request Code mapped directly to its database primary key. The `Intent` broadcast stores the target ID, medication name, instructions, and family member tags to reconstruct warning labels on the system heads-up notification prompt:
+### C. Adaptive Trigger Adjustments
+When a user logs a dose as **TAKEN** or **SKIPPED**:
+* If they execute the log event when there are **less than 30 minutes remaining** until the medication is scheduled to be due, the system intelligently calculates a dynamic shift forwards. This prevents redundant, back-to-back alarm triggers and optimizes the user's dosage compliance spacing.
 
-```kotlin
-val intent = Intent(context, MedicationAlarmReceiver::class.java).apply {
-    putExtra("medKey", medication.id)
-    putExtra("medName", medication.name)
-    putExtra("medDosage", medication.dosage)
-    putExtra("instructions", medication.instructions)
-    putExtra("memberName", memberName)
-}
-val pendingIntent = PendingIntent.getBroadcast(
-    context,
-    medication.id.toInt(),
-    intent,
-    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-)
-```
-
-### D. System-Level Interruption Protocol & Bypassing Standby
-To achieve fail-safe alarms even when the device is asleep or locked:
-1.  **Exact Timers (Doze-Mode Resist)**: Leverages `AlarmManager.setExactAndAllowWhileIdle()` to guarantee execution across Doze mode transitions.
-2.  **Foreground Service Continuity**: The broadcast delegate starts `MedicationAlarmService` in the foreground. By utilizing `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_MEDIA_PLAYBACK` permissions, the service executes persistent, high-volume feedback streams.
-3.  **Tiered Cascading Audio Fallbacks**: The `MediaPlayer` handles failure-resilient playback by testing a prioritized roster of system-level sound URIs: `TYPE_ALARM` is prioritized, falling back automatically to `TYPE_RINGTONE` (incoming call ringing), and scaling down to `TYPE_NOTIFICATION` should system paths throw IOExceptions. It handles file decoding loop boundaries using `isLooping = true` coupled with an asynchronous auto-replay `OnCompletionListener` trigger.
-4.  **Looping Vibration Engine**: Synchronized seamlessly with active audio playback. Employs a custom asynchronous vibration pattern generator via device haptic motors (`VIBRATOR_SERVICE`) that safely stops and tears down when action flags (Take, Skip, or Mute) are dispatched.
-5.  **Lockscreen Interrupt Overhead**: Uses the `USE_FULL_SCREEN_INTENT` permission, initializing a high-importance `NotificationChannel` with `fullScreenIntent` parameters mapping directly to `AlarmActivity`. On waking, standard window flags (`FLAG_SHOW_WHEN_LOCKED` / `FLAG_TURN_SCREEN_ON`) pull the activity into view above the lock screen.
+### D. System-Level Interruption Protocol & Snooze
+* **Doze-Mode Resist**: Leverages `AlarmManager.setExactAndAllowWhileIdle()` to guarantee execution across standby or Doze state transitions.
+* **Foreground Service Continuity & Wake Activities**: Broadcasts activate high-volume `MediaPlayer` sound loop structures with vibration fallbacks alongside lockscreen-bypassing patient windows (`AlarmActivity`).
+* **Snooze Engine**: Users can select the **Snooze** action to silence alarms for exactly **30 minutes**, scheduling an independent, precise snooze wakeup window.
 
 ---
 
 ## 6. UI & UX Layout Polish (Material Design 3)
-
 The user interface utilizes custom Material 3 components aligned on an asymmetric layout designed with elegant spacing:
-
 *   **Adaptive Header Workspace**: Features a stylized status brand logo incorporating clinic cross geometries, coupled with a distinct "Add Profile" action key.
-*   **Profile Tag Ribbon**: High-contrast animated horizontal chips allowing quick profile traversal. Each family profile is represented by a specific custom tag color mapping to visual borders out of the box.
-*   **Search Box Navigation**: Real-time debounce filters mapped to searching lists, isolating notes and dosage constraints instantly.
-*   **Medication Cards Layout**: Uses spacious layouts featuring:
-    *   Automatic opacity dims for disabled (switched off) active states.
-    *   Dynamic border colors derived from the active family member's chosen theme.
-    *   High-contrast, dual-colored command elements (Primary "Log Taken" button paired with Outlined Secondary "Log Skipped" control).
-*   **Logs Trace Timeline**: A simplified ledger monitoring recent historical actions. Uses visual indicators for success logs (primary containers mapping a check icon) or warnings (neutral bounds mapping blockage alerts).
+*   **Profile Tag Ribbon**: High-contrast horizontal chips allowing quick profile traversal.
+*   **Unified Active/Inactive Toggles**: Clean, minimalist switch configurations without redundant visual labels (such as "Active" or "Inactive" text).
+*   **Shared Keyword Search & History Isolation**: Allows users to filter scheduled medications and historical intake ledger records under composite queries, dynamically combining profile selection with the central text search bar queries.
 
 ---
 
 ## 7. Accessibility & Validation Tags
-
-To support automatic instrumented test automation and comply with Google Play Accessibility expectations, all interactive components are fully configured:
+All interactive components are fully configured:
 *   **Touch Targets**: Minimum interactive layout size is constrained to `48.dp x 48.dp` utilizing surrounding padding configurations.
 *   **Testing Tags**:
     *   Search Bar: `Modifier.testTag("medicine_search")`
     *   Floating Action Button: `Modifier.testTag("add_medication_fab")`
     *   Save Reminders Option: `Modifier.testTag("save_medication_button")`
     *   Save Profiles Option: `Modifier.testTag("save_profile_button")`
-    *   Specific Profile Tag Chips: `Modifier.testTag("profile_pill_grandma")`, `Modifier.testTag("profile_pill_all")`
 
 ---
 
@@ -204,12 +138,9 @@ To support automatic instrumented test automation and comply with Google Play Ac
 To verify complete compilation and execute Robolectric unit/screenshot regressions locally, engineers can utilize Gradle commands:
 
 ```bash
-# 1. Compile the complete application
+# Compile and build the application
 gradle assembleDebug
 
-# 2. Run target Robolectric and business logic tests
+# Run Robolectric unit and UI tests
 gradle :app:testDebugUnitTest
-
-# 3. Clean project build files (use only when necessary)
-gradle clean
 ```
