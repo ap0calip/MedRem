@@ -193,6 +193,14 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
                 )
                 dao.insertDoseRecord(record)
                 Log.d(TAG, "Logged dose record: medName=$medName, status=$status")
+
+                if (medication != null) {
+                    val updatedMed = medication.copy(lastLoggedTime = now, snoozedUntil = 0L)
+                    dao.insertMedication(updatedMed)
+                    if (updatedMed.isActive) {
+                        ReminderScheduler.scheduleAlarm(context, updatedMed)
+                    }
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error logging dose record in BroadcastReceiver: ${e.message}", e)
             }

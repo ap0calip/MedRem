@@ -264,7 +264,7 @@ class MedicationAlarmService : Service() {
                 val medication = dao.getMedicationById(medId)
                 if (medication != null) {
                     if (action == ACTION_DISMISS) {
-                        val snoozeTime = System.currentTimeMillis() + 10 * 60 * 1000L
+                        val snoozeTime = System.currentTimeMillis() + 30 * 60 * 1000L
                         val updatedMed = medication.copy(snoozedUntil = snoozeTime)
                         dao.insertMedication(updatedMed)
                         ReminderScheduler.scheduleSnoozeAlarm(applicationContext, updatedMed, snoozeTime)
@@ -299,6 +299,14 @@ class MedicationAlarmService : Service() {
                     )
                     dao.insertDoseRecord(record)
                     Log.d(TAG, "Logged dose record from Alarm Service: medName=$medName, status=$status")
+
+                    if (medication != null) {
+                        val updatedMed = medication.copy(lastLoggedTime = now, snoozedUntil = 0L)
+                        dao.insertMedication(updatedMed)
+                        if (updatedMed.isActive) {
+                            ReminderScheduler.scheduleAlarm(applicationContext, updatedMed)
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling action $action in Service: ${e.message}", e)

@@ -116,6 +116,13 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
         snoozedUntil: Long = 0L
     ) {
         viewModelScope.launch {
+            var lastLogged = 0L
+            if (id != 0L) {
+                repository.getMedicationById(id)?.let {
+                    lastLogged = it.lastLoggedTime
+                }
+            }
+
             val med = Medication(
                 id = id,
                 name = name.trim(),
@@ -128,7 +135,8 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                 startDate = startDate,
                 familyMemberId = familyMemberId,
                 isActive = isActive,
-                snoozedUntil = snoozedUntil
+                snoozedUntil = snoozedUntil,
+                lastLoggedTime = lastLogged
             )
 
             val newId = repository.insertMedication(med)
@@ -170,10 +178,14 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
             repository.insertDoseRecord(record)
 
             // Auto reschedule to next interval or day
-            if (medication.isActive) {
-                val clearedSnoozeMed = medication.copy(snoozedUntil = 0L)
-                repository.insertMedication(clearedSnoozeMed)
-                ReminderScheduler.scheduleAlarm(getApplication(), clearedSnoozeMed)
+            val updatedMed = if (medication.isActive) {
+                medication.copy(snoozedUntil = 0L, lastLoggedTime = now)
+            } else {
+                medication.copy(lastLoggedTime = now)
+            }
+            repository.insertMedication(updatedMed)
+            if (updatedMed.isActive) {
+                ReminderScheduler.scheduleAlarm(getApplication(), updatedMed)
             }
         }
     }

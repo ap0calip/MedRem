@@ -13,7 +13,7 @@ import java.util.Calendar
 object ReminderScheduler {
     private const val TAG = "ReminderScheduler"
 
-    fun getNextTriggerTime(medication: Medication, currentMillis: Long = System.currentTimeMillis()): Long {
+    private fun calculateRawNextTrigger(medication: Medication, startAfterMillis: Long): Long {
         val parts = medication.startTime.split(":")
         val hour = parts.getOrNull(0)?.toIntOrNull() ?: 8
         val minute = parts.getOrNull(1)?.toIntOrNull() ?: 0
@@ -26,13 +26,13 @@ object ReminderScheduler {
             if (days.isEmpty()) {
                 // Return tomorrow at the same time if no custom day is chosen
                 val targetCal = Calendar.getInstance().apply {
-                    timeInMillis = currentMillis
+                    timeInMillis = startAfterMillis
                     set(Calendar.HOUR_OF_DAY, hour)
                     set(Calendar.MINUTE, minute)
                     set(Calendar.SECOND, 0)
                     set(Calendar.MILLISECOND, 0)
                 }
-                if (targetCal.timeInMillis <= currentMillis) {
+                if (targetCal.timeInMillis <= startAfterMillis) {
                     targetCal.add(Calendar.DAY_OF_YEAR, 1)
                 }
                 return targetCal.timeInMillis
@@ -54,7 +54,7 @@ object ReminderScheduler {
             // Search next 7 days (including today)
             for (i in 0..7) {
                 val testCal = Calendar.getInstance().apply {
-                    timeInMillis = currentMillis
+                    timeInMillis = startAfterMillis
                     add(Calendar.DAY_OF_YEAR, i)
                     set(Calendar.HOUR_OF_DAY, hour)
                     set(Calendar.MINUTE, minute)
@@ -63,13 +63,13 @@ object ReminderScheduler {
                 }
                 val dayOfWeek = testCal.get(Calendar.DAY_OF_WEEK)
                 if (targetDays.contains(dayOfWeek)) {
-                    if (testCal.timeInMillis > currentMillis) {
+                    if (testCal.timeInMillis > startAfterMillis) {
                         minNextTime = minOf(minNextTime, testCal.timeInMillis)
                     }
                 }
             }
             return if (minNextTime == Long.MAX_VALUE) {
-                currentMillis + 24 * 60 * 60 * 1000L
+                startAfterMillis + 24 * 60 * 60 * 1000L
             } else {
                 minNextTime
             }
@@ -85,18 +85,29 @@ object ReminderScheduler {
             }
 
             val startMillis = startCal.timeInMillis
-            if (startMillis > currentMillis) {
+            if (startMillis > startAfterMillis) {
                 return startMillis
             }
 
             val intervalMillis = medication.intervalHours * 60 * 60 * 1000L
             if (intervalMillis <= 0) {
-                return currentMillis + 24 * 60 * 60 * 1000L // Safeguard
+                return startAfterMillis + 24 * 60 * 60 * 1000L // Safeguard
             }
-            val elapsed = currentMillis - startMillis
+            val elapsed = startAfterMillis - startMillis
             val count = (elapsed / intervalMillis) + 1
             return startMillis + (count * intervalMillis)
         }
+    }
+
+    fun getNextTriggerTime(medication: Medication, currentMillis: Long = System.currentTimeMillis()): Long {
+        var nextTrigger = calculateRawNextTrigger(medication, currentMillis)
+
+        // Adjust Next Trigger if a dose was logged within 30 minutes of this scheduled time
+        if (medication.lastLoggedTime != 0L && nextTrigger - medication.lastLoggedTime < 30 * 60 * 1000L) {
+            nextTrigger = calculateRawNextTrigger(medication, nextTrigger + 60_000L)
+        }
+
+        return nextTrigger
     }
 
     fun scheduleAlarm(context: Context, medication: Medication) {

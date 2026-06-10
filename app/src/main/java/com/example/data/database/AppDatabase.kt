@@ -11,7 +11,7 @@ import com.example.data.entity.Medication
 
 @Database(
     entities = [FamilyMember::class, Medication::class, DoseRecord::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

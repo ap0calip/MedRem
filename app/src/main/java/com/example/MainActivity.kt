@@ -398,12 +398,20 @@ fun MedRedApp(
                     }
                 } else {
                     // Log History List
-                    val filteredRecords = remember(doseRecords, selectedProfileId) {
-                        if (selectedProfileId == 0L) {
+                    val filteredRecords = remember(doseRecords, selectedProfileId, searchQuery) {
+                        val base = if (selectedProfileId == 0L) {
                             doseRecords
                         } else {
                             val targetMemberName = familyMembers.find { it.id == selectedProfileId }?.name
                             doseRecords.filter { it.familyMemberName == targetMemberName }
+                        }
+                        if (searchQuery.isEmpty()) {
+                            base
+                        } else {
+                            base.filter {
+                                it.medicationName.contains(searchQuery, ignoreCase = true) ||
+                                it.dosage.contains(searchQuery, ignoreCase = true)
+                            }
                         }
                     }
 
@@ -637,12 +645,6 @@ fun MedicationReminderCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = if (medication.isActive) "Active" else "Inactive",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    )
                     Switch(
                         checked = medication.isActive,
                         onCheckedChange = { onToggleActive(it) },
