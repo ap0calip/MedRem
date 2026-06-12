@@ -21,6 +21,36 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
+data class ActiveReminder(
+    val medId: Long,
+    val medName: String,
+    val dosage: String,
+    val instructions: String,
+    val familyMemberId: Long
+)
+
+object ActiveAlarmManager {
+    val activeAlarms = kotlinx.coroutines.flow.MutableStateFlow<List<ActiveReminder>>(emptyList())
+
+    fun addAlarm(reminder: ActiveReminder) {
+        val current = activeAlarms.value.toMutableList()
+        if (current.none { it.medId == reminder.medId }) {
+            current.add(reminder)
+            activeAlarms.value = current
+            Log.d("ActiveAlarmManager", "Added alarm: ${reminder.medName}, total: ${activeAlarms.value.size}")
+        }
+    }
+
+    fun removeAlarm(medId: Long) {
+        val current = activeAlarms.value.toMutableList()
+        val removed = current.removeAll { it.medId == medId }
+        if (removed) {
+            activeAlarms.value = current
+            Log.d("ActiveAlarmManager", "Removed alarm ID: $medId, total: ${activeAlarms.value.size}")
+        }
+    }
+}
+
 class MedicationAlarmService : Service() {
 
     private var mediaPlayer: MediaPlayer? = null
@@ -34,6 +64,19 @@ class MedicationAlarmService : Service() {
         Log.d(TAG, "onCreate: MedicationAlarmService started")
         startAlarmSound()
         startVibration()
+
+        serviceScope.launch {
+            ActiveAlarmManager.activeAlarms.collect { list ->
+                if (list.isEmpty()) {
+                    Log.d(TAG, "Active alarm list is empty, stopping service")
+                    stopAlarmSound()
+                    stopForeground(true)
+                    stopSelf()
+                } else {
+                    showForegroundNotification()
+                }
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -48,11 +91,13 @@ class MedicationAlarmService : Service() {
 
         Log.d(TAG, "onStartCommand: action=$action, medId=$medId, medName=$medName")
 
-        if (action == ACTION_TAKE || action == ACTION_SKIP || action == ACTION_DISMISS) {
+        if (action == ACTION_TAKE || action == ACTION_SKIP || action == ACTION_DISMISS ||
+            action == ACTION_TAKE_ALL || action == ACTION_DISMISS_ALL) {
             handleServiceAction(action, medId, medName, dosage)
             return START_NOT_STICKY
         }
 
+        // Standard alarm trigger
         // Persistent Alarm: ensure sound & vibration are running if already alive
         if (mediaPlayer == null || mediaPlayer?.isPlaying == false) {
             startAlarmSound()
@@ -60,7 +105,8 @@ class MedicationAlarmService : Service() {
         startVibration()
 
         if (medId != -1L) {
-            showForegroundNotification(medId, medName, dosage, instructions, familyMemberId)
+            val reminder = ActiveReminder(medId, medName, dosage, instructions, familyMemberId)
+            ActiveAlarmManager.addAlarm(reminder)
         }
 
         return START_STICKY
@@ -152,20 +198,14 @@ class MedicationAlarmService : Service() {
         }
     }
 
-    private fun showForegroundNotification(
-        medId: Long,
-        medName: String,
-        dosage: String,
-        instructions: String,
-        familyMemberId: Long
-    ) {
+    private suspend fun showForegroundNotification() {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channelId = "medred_urgent_alarms"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
-                "Urgent Medication Alarms",
+                "Medication Alarms",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "High-priority alarms with sound and visual overlays."
@@ -175,136 +215,222 @@ class MedicationAlarmService : Service() {
             notificationManager.createNotificationChannel(channel)
         }
 
+        val list = ActiveAlarmManager.activeAlarms.value
+        if (list.isEmpty()) {
+            return
+        }
+
         // Full-screen Intent setup to trigger AlarmActivity directly
         val fullScreenIntent = Intent(this, AlarmActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_USER_ACTION or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("MED_ID", medId)
-            putExtra("MED_NAME", medName)
-            putExtra("MED_DOSAGE", dosage)
-            putExtra("MED_INSTRUCTIONS", instructions)
-            putExtra("FAMILY_MEMBER_ID", familyMemberId)
         }
         val fullScreenPendingIntent = PendingIntent.getActivity(
             this,
-            medId.toInt() * 100,
+            8888,
             fullScreenIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Notification Action intents (Trigger service directly)
-        val takeIntent = Intent(this, MedicationAlarmService::class.java).apply {
-            action = ACTION_TAKE
-            putExtra("MED_ID", medId)
-            putExtra("MED_NAME", medName)
-            putExtra("MED_DOSAGE", dosage)
-        }
-        val takePendingIntent = PendingIntent.getService(
-            this,
-            medId.toInt() * 100 + 1,
-            takeIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val skipIntent = Intent(this, MedicationAlarmService::class.java).apply {
-            action = ACTION_SKIP
-            putExtra("MED_ID", medId)
-            putExtra("MED_NAME", medName)
-            putExtra("MED_DOSAGE", dosage)
-        }
-        val skipPendingIntent = PendingIntent.getService(
-            this,
-            medId.toInt() * 100 + 2,
-            skipIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val detailText = listOfNotNull(
-            if (dosage.isNotEmpty()) "Dosage: $dosage" else null,
-            if (instructions.isNotEmpty()) "Note: $instructions" else null
-        ).joinToString(" | ")
-
         val builder = NotificationCompat.Builder(this, channelId)
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
-            .setContentTitle("Urgent: Medication Reminder")
-            .setContentText("Time to take your $medName (${dosage})")
-            .setSubText(if (detailText.isNotEmpty()) detailText else null)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(false)
             .setOngoing(true)
             .setFullScreenIntent(fullScreenPendingIntent, true)
-            .addAction(android.R.drawable.checkbox_on_background, "Take It", takePendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Skip", skipPendingIntent)
+
+        val db = AppDatabase.getDatabase(applicationContext)
+
+        if (list.size == 1) {
+            val rem = list.first()
+            val member = db.dao().getFamilyMemberById(rem.familyMemberId)
+            val profileName = member?.name ?: "Me"
+            val profileColorHex = member?.colorHex ?: "#B00020"
+
+            builder.setContentTitle("$profileName: ${rem.medName}")
+            builder.setContentText(rem.dosage)
+            try {
+                builder.setColor(android.graphics.Color.parseColor(profileColorHex))
+            } catch (e: Exception) {}
+
+            val takeIntent = Intent(this, MedicationAlarmService::class.java).apply {
+                action = ACTION_TAKE
+                putExtra("MED_ID", rem.medId)
+                putExtra("MED_NAME", rem.medName)
+                putExtra("MED_DOSAGE", rem.dosage)
+            }
+            val takePendingIntent = PendingIntent.getService(
+                this,
+                rem.medId.toInt() * 100 + 1,
+                takeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val snoozeIntent = Intent(this, MedicationAlarmService::class.java).apply {
+                action = ACTION_DISMISS
+                putExtra("MED_ID", rem.medId)
+            }
+            val snoozePendingIntent = PendingIntent.getService(
+                this,
+                rem.medId.toInt() * 100 + 2,
+                snoozeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            builder.addAction(android.R.drawable.checkbox_on_background, "Taken", takePendingIntent)
+            builder.addAction(android.R.drawable.ic_lock_idle_alarm, "Snooze", snoozePendingIntent)
+        } else {
+            // Find all unique profile names for the active reminders
+            val profileNames = list.map { rem ->
+                db.dao().getFamilyMemberById(rem.familyMemberId)?.name ?: "Me"
+            }.distinct()
+
+            val namesLabel = if (profileNames.isEmpty()) {
+                "Me"
+            } else if (profileNames.size == 1) {
+                profileNames.first()
+            } else if (profileNames.size == 2) {
+                "${profileNames[0]} & ${profileNames[1]}"
+            } else {
+                profileNames.joinToString(", ")
+            }
+
+            builder.setContentTitle("$namesLabel: Multiple Medications Due")
+            val names = list.joinToString(", ") { it.medName }
+            builder.setContentText("${list.size} medications can be taken: $names")
+
+            val takeAllIntent = Intent(this, MedicationAlarmService::class.java).apply {
+                action = ACTION_TAKE_ALL
+            }
+            val takeAllPendingIntent = PendingIntent.getService(
+                this,
+                8889,
+                takeAllIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val snoozeAllIntent = Intent(this, MedicationAlarmService::class.java).apply {
+                action = ACTION_DISMISS_ALL
+            }
+            val snoozeAllPendingIntent = PendingIntent.getService(
+                this,
+                8890,
+                snoozeAllIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            builder.addAction(android.R.drawable.checkbox_on_background, "Taken All", takeAllPendingIntent)
+            builder.addAction(android.R.drawable.ic_lock_idle_alarm, "Snooze All", snoozeAllPendingIntent)
+        }
 
         val notification = builder.build()
-
-        val notificationId = if (medId <= 0) 99999 + Math.abs(medId.toInt()) else medId.toInt()
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
-                notificationId,
+                8888,
                 notification,
                 ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
             )
         } else {
-            startForeground(notificationId, notification)
+            startForeground(8888, notification)
         }
+
+        notificationManager.notify(8888, notification)
     }
 
     private fun handleServiceAction(action: String, medId: Long, medName: String, dosage: String) {
-        stopAlarmSound()
-        stopForeground(true)
-        stopSelf()
-
         serviceScope.launch {
             try {
                 val db = AppDatabase.getDatabase(applicationContext)
                 val dao = db.dao()
+                val now = System.currentTimeMillis()
 
-                val medication = dao.getMedicationById(medId)
-                if (medication != null) {
+                if (action == ACTION_TAKE_ALL) {
+                    val alarmsToHandle = ActiveAlarmManager.activeAlarms.value.toList()
+                    ActiveAlarmManager.activeAlarms.value = emptyList() // clear immediately
+
+                    alarmsToHandle.forEach { rem ->
+                        val medication = dao.getMedicationById(rem.medId)
+                        val familyMemberName = if (medication != null) {
+                            dao.getFamilyMemberById(medication.familyMemberId)?.name ?: "Me"
+                        } else {
+                            "Me"
+                        }
+                        val record = DoseRecord(
+                            medicationId = rem.medId,
+                            medicationName = rem.medName,
+                            familyMemberName = familyMemberName,
+                            dosage = rem.dosage,
+                            scheduledTime = now,
+                            actualTime = now,
+                            status = "TAKEN"
+                        )
+                        dao.insertDoseRecord(record)
+                        if (medication != null) {
+                            val updatedMed = medication.copy(lastLoggedTime = now, snoozedUntil = 0L)
+                            dao.insertMedication(updatedMed)
+                            if (updatedMed.isActive) {
+                                ReminderScheduler.scheduleAlarm(applicationContext, updatedMed)
+                            }
+                        }
+                    }
+                } else if (action == ACTION_DISMISS_ALL) {
+                    val alarmsToHandle = ActiveAlarmManager.activeAlarms.value.toList()
+                    ActiveAlarmManager.activeAlarms.value = emptyList() // clear immediately
+
+                    alarmsToHandle.forEach { rem ->
+                        val medication = dao.getMedicationById(rem.medId)
+                        if (medication != null) {
+                            val snoozeTime = now + 30 * 60 * 1000L
+                            val updatedMed = medication.copy(snoozedUntil = snoozeTime)
+                            dao.insertMedication(updatedMed)
+                            ReminderScheduler.scheduleSnoozeAlarm(applicationContext, updatedMed, snoozeTime)
+                        }
+                    }
+                } else {
+                    // Single item logic
+                    val medication = dao.getMedicationById(medId)
+                    ActiveAlarmManager.removeAlarm(medId)
+
                     if (action == ACTION_DISMISS) {
-                        val snoozeTime = System.currentTimeMillis() + 30 * 60 * 1000L
-                        val updatedMed = medication.copy(snoozedUntil = snoozeTime)
-                        dao.insertMedication(updatedMed)
-                        ReminderScheduler.scheduleSnoozeAlarm(applicationContext, updatedMed, snoozeTime)
-                        Log.d(TAG, "Snoozed medication ${medication.name} until $snoozeTime")
-                        return@launch
+                        if (medication != null) {
+                            val snoozeTime = now + 30 * 60 * 1000L
+                            val updatedMed = medication.copy(snoozedUntil = snoozeTime)
+                            dao.insertMedication(updatedMed)
+                            ReminderScheduler.scheduleSnoozeAlarm(applicationContext, updatedMed, snoozeTime)
+                            Log.d(TAG, "Snoozed medication ${medication.name} until $snoozeTime")
+                        }
                     } else {
-                        // Clear snooze condition
-                        if (medication.snoozedUntil != 0L) {
+                        // Clear snooze condition if we took it or skipped it
+                        if (medication != null && medication.snoozedUntil != 0L) {
                             val updatedMed = medication.copy(snoozedUntil = 0L)
                             dao.insertMedication(updatedMed)
                         }
-                    }
-                }
 
-                if (action != ACTION_DISMISS) {
-                    val familyMemberName = if (medication != null) {
-                        dao.getFamilyMemberById(medication.familyMemberId)?.name ?: "Me"
-                    } else {
-                        "Me"
-                    }
+                        val familyMemberName = if (medication != null) {
+                            dao.getFamilyMemberById(medication.familyMemberId)?.name ?: "Me"
+                        } else {
+                            "Me"
+                        }
 
-                    val status = if (action == ACTION_TAKE) "TAKEN" else "SKIPPED"
-                    val now = System.currentTimeMillis()
-                    val record = DoseRecord(
-                        medicationId = medId,
-                        medicationName = medName,
-                        familyMemberName = familyMemberName,
-                        dosage = dosage,
-                        scheduledTime = now,
-                        actualTime = now,
-                        status = status
-                    )
-                    dao.insertDoseRecord(record)
-                    Log.d(TAG, "Logged dose record from Alarm Service: medName=$medName, status=$status")
+                        val status = if (action == ACTION_TAKE) "TAKEN" else "SKIPPED"
+                        val record = DoseRecord(
+                            medicationId = medId,
+                            medicationName = medName,
+                            familyMemberName = familyMemberName,
+                            dosage = dosage,
+                            scheduledTime = now,
+                            actualTime = now,
+                            status = status
+                        )
+                        dao.insertDoseRecord(record)
+                        Log.d(TAG, "Logged dose record from Alarm Service: medName=$medName, status=$status")
 
-                    if (medication != null) {
-                        val updatedMed = medication.copy(lastLoggedTime = now, snoozedUntil = 0L)
-                        dao.insertMedication(updatedMed)
-                        if (updatedMed.isActive) {
-                            ReminderScheduler.scheduleAlarm(applicationContext, updatedMed)
+                        if (medication != null) {
+                            val updatedMed = medication.copy(lastLoggedTime = now, snoozedUntil = 0L)
+                            dao.insertMedication(updatedMed)
+                            if (updatedMed.isActive) {
+                                ReminderScheduler.scheduleAlarm(applicationContext, updatedMed)
+                            }
                         }
                     }
                 }
@@ -325,5 +451,7 @@ class MedicationAlarmService : Service() {
         const val ACTION_TAKE = "com.example.reminder.service.ACTION_TAKE"
         const val ACTION_SKIP = "com.example.reminder.service.ACTION_SKIP"
         const val ACTION_DISMISS = "com.example.reminder.service.ACTION_DISMISS"
+        const val ACTION_TAKE_ALL = "com.example.reminder.service.ACTION_TAKE_ALL"
+        const val ACTION_DISMISS_ALL = "com.example.reminder.service.ACTION_DISMISS_ALL"
     }
 }

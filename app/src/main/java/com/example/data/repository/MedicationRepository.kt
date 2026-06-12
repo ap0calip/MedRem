@@ -48,6 +48,10 @@ class MedicationRepository(private val dao: AppDao) {
         return dao.insertFamilyMember(familyMember)
     }
 
+    suspend fun updateFamilyMember(familyMember: FamilyMember) {
+        dao.updateFamilyMember(familyMember)
+    }
+
     suspend fun deleteFamilyMember(familyMember: FamilyMember) {
         dao.deleteFamilyMember(familyMember)
     }

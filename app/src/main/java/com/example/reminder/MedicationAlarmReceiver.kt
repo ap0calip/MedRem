@@ -28,13 +28,16 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
 
         Log.d(TAG, "onReceive: action=$action, medId=$medId, medName=$medName")
 
-        if (action == ACTION_TAKE || action == ACTION_SKIP) {
+        if (action == ACTION_TAKE || action == ACTION_SKIP || action == ACTION_SNOOZE) {
             handleNotificationAction(context, action, medId, medName, dosage)
             return
         }
 
         // Standard alarm trigger - spawn the high-priority alarm foreground service and schedule the NEXT alarm for this medication
         if (medId != -1L) {
+            val reminder = ActiveReminder(medId, medName, dosage, instructions, familyMemberId)
+            ActiveAlarmManager.addAlarm(reminder)
+
             try {
                 val serviceIntent = Intent(context, MedicationAlarmService::class.java).apply {
                     putExtra("MED_ID", medId)
@@ -123,37 +126,56 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Intent for "Skip" action button
-        val skipIntent = Intent(context, MedicationAlarmReceiver::class.java).apply {
-            setAction(ACTION_SKIP)
+        // Intent for "Snooze" action button (replacing "Skip")
+        val snoozeIntent = Intent(context, MedicationAlarmReceiver::class.java).apply {
+            setAction(ACTION_SNOOZE)
             putExtra("MED_ID", medId)
             putExtra("MED_NAME", medName)
             putExtra("MED_DOSAGE", dosage)
         }
-        val skipPendingIntent = PendingIntent.getBroadcast(
+        val snoozePendingIntent = PendingIntent.getBroadcast(
             context,
             medId.toInt() * 10 + 2,
-            skipIntent,
+            snoozeIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val detailText = listOfNotNull(
-            if (dosage.isNotEmpty()) "Dosage: $dosage" else null,
-            if (instructions.isNotEmpty()) "Note: $instructions" else null
-        ).joinToString(" | ")
+        fun buildAndPost(profileName: String, profileColorHex: String) {
+            val builder = NotificationCompat.Builder(context, channelId)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("$profileName: $medName")
+                .setContentText(dosage)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(mainPendingIntent)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .addAction(android.R.drawable.checkbox_on_background, "Taken", takePendingIntent)
+                .addAction(android.R.drawable.ic_lock_idle_alarm, "Snooze", snoozePendingIntent)
 
-        val builder = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(android.R.drawable.ic_dialog_info) // Fallback drawable or default dialog icon
-            .setContentTitle("Time to take your $medName")
-            .setContentText(if (detailText.isNotEmpty()) detailText else "Please record your dose.")
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
-            .setContentIntent(mainPendingIntent)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .addAction(android.R.drawable.checkbox_on_background, "Take It", takePendingIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Skip", skipPendingIntent)
+            try {
+                builder.setColor(android.graphics.Color.parseColor(profileColorHex))
+            } catch (e: Exception) {
+                // Ignore parse errors
+            }
 
-        notificationManager.notify(medId.toInt(), builder.build())
+            notificationManager.notify(medId.toInt(), builder.build())
+        }
+
+        // Post placeholder immediately
+        buildAndPost("Me", "#B00020")
+
+        // Look up profile details off-thread
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val db = AppDatabase.getDatabase(context)
+                val member = db.dao().getFamilyMemberById(familyMemberId)
+                val profileName = member?.name ?: "Me"
+                val profileColorHex = member?.colorHex ?: "#B00020"
+                buildAndPost(profileName, profileColorHex)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error fetching profile info in BroadcastReceiver: ${e.message}", e)
+            }
+        }
     }
 
     private fun handleNotificationAction(
@@ -165,6 +187,26 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
     ) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.cancel(medId.toInt())
+
+        if (action == ACTION_SNOOZE) {
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val db = AppDatabase.getDatabase(context)
+                    val dao = db.dao()
+                    val medication = dao.getMedicationById(medId)
+                    if (medication != null) {
+                        val snoozeTime = System.currentTimeMillis() + 30 * 60 * 1000L
+                        val updatedMed = medication.copy(snoozedUntil = snoozeTime)
+                        dao.insertMedication(updatedMed)
+                        ReminderScheduler.scheduleSnoozeAlarm(context, updatedMed, snoozeTime)
+                        Log.d(TAG, "Snoozed from receiver action: medName=$medName until $snoozeTime")
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error snoozing in NotificationAction: ${e.message}", e)
+                }
+            }
+            return
+        }
 
         val status = if (action == ACTION_TAKE) "TAKEN" else "SKIPPED"
 
@@ -226,5 +268,6 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
         private const val TAG = "MedicationAlarmReceiver"
         const val ACTION_TAKE = "com.example.reminder.ACTION_TAKE"
         const val ACTION_SKIP = "com.example.reminder.ACTION_SKIP"
+        const val ACTION_SNOOZE = "com.example.reminder.ACTION_SNOOZE"
     }
 }

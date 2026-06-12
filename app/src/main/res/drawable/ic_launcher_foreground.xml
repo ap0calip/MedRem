@@ -3,6 +3,6 @@
     <item
         android:width="66dp"
         android:height="66dp"
-        android:drawable="@drawable/ic_medred_logo_1780885677640"
+        android:drawable="@drawable/m4"
         android:gravity="center" />
 </layer-list>

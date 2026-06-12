@@ -79,11 +79,15 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
         searchQuery.value = query
     }
 
-    fun addFamilyMember(name: String, colorHex: String) {
+    fun addOrUpdateFamilyMember(id: Long = 0L, name: String, colorHex: String, isMe: Boolean = false) {
         viewModelScope.launch {
             if (name.isNotBlank()) {
-                val member = FamilyMember(name = name.trim(), colorHex = colorHex)
-                repository.insertFamilyMember(member)
+                val member = FamilyMember(id = id, name = name.trim(), colorHex = colorHex, isMe = isMe)
+                if (id == 0L) {
+                    repository.insertFamilyMember(member)
+                } else {
+                    repository.updateFamilyMember(member)
+                }
             }
         }
     }

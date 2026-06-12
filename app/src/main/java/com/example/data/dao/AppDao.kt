@@ -22,6 +22,9 @@ interface AppDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFamilyMember(familyMember: FamilyMember): Long
 
+    @Update
+    suspend fun updateFamilyMember(familyMember: FamilyMember)
+
     @Delete
     suspend fun deleteFamilyMember(familyMember: FamilyMember)
 

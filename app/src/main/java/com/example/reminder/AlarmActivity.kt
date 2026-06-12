@@ -13,6 +13,8 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -42,12 +44,6 @@ import kotlinx.coroutines.withContext
 
 class AlarmActivity : ComponentActivity() {
 
-    private var currentMedId = mutableStateOf(-1L)
-    private var currentMedName = mutableStateOf("Medication")
-    private var currentDosage = mutableStateOf("")
-    private var currentInstructions = mutableStateOf("")
-    private var currentFamilyMemberId = mutableStateOf(-1L)
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.d(TAG, "onCreate: AlarmActivity started")
@@ -73,11 +69,6 @@ class AlarmActivity : ComponentActivity() {
         setContent {
             MyApplicationTheme {
                 AlarmScreen(
-                    medId = currentMedId.value,
-                    medName = currentMedName.value,
-                    dosage = currentDosage.value,
-                    instructions = currentInstructions.value,
-                    familyMemberId = currentFamilyMemberId.value,
                     onActionTaken = { finish() }
                 )
             }
@@ -91,12 +82,17 @@ class AlarmActivity : ComponentActivity() {
     }
 
     private fun updateFields(intent: Intent) {
-        currentMedId.value = intent.getLongExtra("MED_ID", -1L)
-        currentMedName.value = intent.getStringExtra("MED_NAME") ?: "Medication"
-        currentDosage.value = intent.getStringExtra("MED_DOSAGE") ?: ""
-        currentInstructions.value = intent.getStringExtra("MED_INSTRUCTIONS") ?: ""
-        currentFamilyMemberId.value = intent.getLongExtra("FAMILY_MEMBER_ID", -1L)
-        Log.d(TAG, "updateFields: updated medId=${currentMedId.value}, name=${currentMedName.value}")
+        val medId = intent.getLongExtra("MED_ID", -1L)
+        val medName = intent.getStringExtra("MED_NAME") ?: "Medication"
+        val dosage = intent.getStringExtra("MED_DOSAGE") ?: ""
+        val instructions = intent.getStringExtra("MED_INSTRUCTIONS") ?: ""
+        val familyMemberId = intent.getLongExtra("FAMILY_MEMBER_ID", -1L)
+
+        if (medId != -1L) {
+            val reminder = ActiveReminder(medId, medName, dosage, instructions, familyMemberId)
+            ActiveAlarmManager.addAlarm(reminder)
+        }
+        Log.d(TAG, "updateFields: processed medId=$medId, name=$medName")
     }
 
     companion object {
@@ -104,70 +100,27 @@ class AlarmActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlarmScreen(
-    medId: Long,
-    medName: String,
-    dosage: String,
-    instructions: String,
-    familyMemberId: Long,
     onActionTaken: () -> Unit
 ) {
     val context = LocalContext.current
+    val activeAlarms by ActiveAlarmManager.activeAlarms.collectAsState()
 
     androidx.activity.compose.BackHandler {
-        // Map back button to the Mute/Snooze action to stop the service sound and close activity!
+        // Map back button to the Snooze All action to stop sound and dismiss activity
         val svcIntent = Intent(context, MedicationAlarmService::class.java).apply {
-            action = MedicationAlarmService.ACTION_DISMISS
-            putExtra("MED_ID", medId)
+            action = MedicationAlarmService.ACTION_DISMISS_ALL
         }
         context.startService(svcIntent)
         onActionTaken()
     }
 
-    var familyMemberName by remember { mutableStateOf("Me") }
-    var familyMemberColorHex by remember { mutableStateOf("#B00020") } // default deep red
-
-    // Fetch family member detail from Database
-    LaunchedEffect(familyMemberId) {
-        if (familyMemberId != -1L) {
-            withContext(Dispatchers.IO) {
-                try {
-                    val db = AppDatabase.getDatabase(context)
-                    val member = db.dao().getFamilyMemberById(familyMemberId)
-                    if (member != null) {
-                        familyMemberName = member.name
-                        familyMemberColorHex = member.colorHex
-                    }
-                } catch (e: Exception) {
-                    Log.e("AlarmActivity", "Failed to fetch family member detail: ${e.message}")
-                }
-            }
+    LaunchedEffect(activeAlarms) {
+        if (activeAlarms.isEmpty()) {
+            onActionTaken()
         }
     }
-
-    // Color parsing helper
-    val defaultPrimary = MaterialTheme.colorScheme.primary
-    val memberColor = remember(familyMemberColorHex, defaultPrimary) {
-        try {
-            Color(android.graphics.Color.parseColor(familyMemberColorHex))
-        } catch (e: Exception) {
-            defaultPrimary
-        }
-    }
-
-    // Alarm Icon scale pulse animation
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val scalePulse by infiniteTransition.animateFloat(
-        initialValue = 0.9f,
-        targetValue = 1.2f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1000, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulse"
-    )
 
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -181,139 +134,86 @@ fun AlarmScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // High-Contrast Alert Card displaying only username, medication, and dose using the user's color scheme
-            Card(
+            // Header Title Area
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .weight(1f)
-                    .padding(vertical = 24.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = memberColor.copy(alpha = 0.08f)
-                ),
-                shape = RoundedCornerShape(24.dp),
-                border = androidx.compose.foundation.BorderStroke(2.dp, memberColor)
+                    .padding(bottom = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.NotificationsActive,
-                        contentDescription = "Alarm Active Icon",
-                        tint = memberColor,
-                        modifier = Modifier
-                            .size(80.dp)
-                            .scale(scalePulse)
+                Icon(
+                    imageVector = Icons.Default.NotificationsActive,
+                    contentDescription = "Alert Active Icon",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(36.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "Medication Reminder",
+                    style = MaterialTheme.typography.headlineSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
                     )
-                    
-                    Spacer(modifier = Modifier.height(32.dp))
-                    
-                    // Username Text in user's color
-                    Text(
-                        text = familyMemberName.uppercase(),
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Black,
-                            letterSpacing = 2.sp
-                        ),
-                        color = memberColor,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.testTag("alarm_username")
-                    )
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    // Medication Name in user's color
-                    Text(
-                        text = medName,
-                        style = MaterialTheme.typography.displayMedium.copy(
-                            fontWeight = FontWeight.Black,
-                            lineHeight = 44.sp
-                        ),
-                        color = memberColor,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.testTag("alarm_med_name")
-                    )
-                    
-                    Spacer(modifier = Modifier.height(16.dp))
-                    
-                    // Dose amount in user's color
-                    Text(
-                        text = dosage,
-                        style = MaterialTheme.typography.headlineLarge.copy(
-                            fontWeight = FontWeight.Bold
-                        ),
-                        color = memberColor,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.testTag("alarm_dosage")
-                    )
-                }
+                )
             }
 
-            // High-Contrast Interactive Actions Area
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                // Action 1: Take Log (Primary Action Button)
-                Button(
-                    onClick = {
-                        val svcIntent = Intent(context, MedicationAlarmService::class.java).apply {
-                            action = MedicationAlarmService.ACTION_TAKE
-                            putExtra("MED_ID", medId)
-                            putExtra("MED_NAME", medName)
-                            putExtra("MED_DOSAGE", dosage)
-                        }
-                        context.startService(svcIntent)
-                        onActionTaken()
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = memberColor
-                    ),
+            if (activeAlarms.size == 1) {
+                // High-Contrast Alert Card displaying only 1 active alarm
+                val rem = activeAlarms.first()
+                SingleAlarmLayout(
+                    reminder = rem,
+                    onActionTaken = onActionTaken
+                )
+            } else if (activeAlarms.isNotEmpty()) {
+                // Multi-Alarm Layout: Beautiful list of cards with individual actions
+                Column(
                     modifier = Modifier
+                        .weight(1f)
                         .fillMaxWidth()
-                        .height(64.dp)
-                        .testTag("alarm_action_take"),
-                    shape = RoundedCornerShape(16.dp)
+                        .padding(vertical = 12.dp)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
+                    Text(
+                        text = "You have ${activeAlarms.size} doses due now:",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium),
+                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
+                    LazyColumn(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Check,
-                            contentDescription = "Check Icon",
-                            tint = Color.White
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = "Record Intake (Taken)",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 18.sp,
-                                color = Color.White
+                        items(activeAlarms, key = { it.medId }) { rem ->
+                            MultiAlarmCard(
+                                reminder = rem,
+                                onAction = { action ->
+                                    val svcIntent = Intent(context, MedicationAlarmService::class.java).apply {
+                                        this.action = action
+                                        putExtra("MED_ID", rem.medId)
+                                        putExtra("MED_NAME", rem.medName)
+                                        putExtra("MED_DOSAGE", rem.dosage)
+                                    }
+                                    context.startService(svcIntent)
+                                }
                             )
-                        )
+                        }
                     }
                 }
 
+                // Global Actions Area for Multi-Alarm Screens
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    // Action 2: Skip Log (Secondary Action Button)
                     OutlinedButton(
                         onClick = {
                             val svcIntent = Intent(context, MedicationAlarmService::class.java).apply {
-                                action = MedicationAlarmService.ACTION_SKIP
-                                putExtra("MED_ID", medId)
-                                putExtra("MED_NAME", medName)
-                                putExtra("MED_DOSAGE", dosage)
+                                action = MedicationAlarmService.ACTION_DISMISS_ALL
                             }
                             context.startService(svcIntent)
                             onActionTaken()
@@ -321,60 +221,404 @@ fun AlarmScreen(
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = MaterialTheme.colorScheme.error
                         ),
-                        border = ButtonDefaults.outlinedButtonBorder.copy(),
+                        border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.error),
                         modifier = Modifier
                             .weight(1f)
                             .height(56.dp)
-                            .testTag("alarm_action_skip"),
+                            .testTag("alarm_action_dismiss_all"),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Block,
-                                contentDescription = "Block Icon"
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Skip Dose",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
-                            )
-                        }
+                        Text("Snooze All", style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold))
                     }
 
-                    // Action 3: Dismiss/Snooze Alert (Bypass/Mute sound only)
-                    FilledTonalButton(
+                    Button(
                         onClick = {
                             val svcIntent = Intent(context, MedicationAlarmService::class.java).apply {
-                                action = MedicationAlarmService.ACTION_DISMISS
-                                putExtra("MED_ID", medId)
+                                action = MedicationAlarmService.ACTION_TAKE_ALL
                             }
                             context.startService(svcIntent)
                             onActionTaken()
                         },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        ),
                         modifier = Modifier
                             .weight(1f)
                             .height(56.dp)
-                            .testTag("alarm_action_dismiss"),
+                            .testTag("alarm_action_take_all"),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Alarm,
-                                contentDescription = "Alarm Dismiss Icon"
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "Mute / Snooze",
-                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
-                            )
-                        }
+                        Text("Take All", style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold), color = Color.White)
                     }
+                }
+            } else {
+                // Empty state fallback / safe layout
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun SingleAlarmLayout(
+    reminder: ActiveReminder,
+    onActionTaken: () -> Unit
+) {
+    val context = LocalContext.current
+    var familyMemberName by remember { mutableStateOf("Me") }
+    var familyMemberColorHex by remember { mutableStateOf("#B00020") } // default deep red
+
+    LaunchedEffect(reminder.familyMemberId) {
+        if (reminder.familyMemberId != -1L) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val db = AppDatabase.getDatabase(context)
+                    val member = db.dao().getFamilyMemberById(reminder.familyMemberId)
+                    if (member != null) {
+                        familyMemberName = member.name
+                        familyMemberColorHex = member.colorHex
+                    }
+                } catch (e: Exception) {
+                    Log.e("AlarmActivity", "Failed to fetch family member detail: ${e.message}")
+                }
+            }
+        }
+    }
+
+    val defaultPrimary = MaterialTheme.colorScheme.primary
+    val memberColor = remember(familyMemberColorHex, defaultPrimary) {
+        try {
+            Color(android.graphics.Color.parseColor(familyMemberColorHex))
+        } catch (e: Exception) {
+            defaultPrimary
+        }
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val scalePulse by infiniteTransition.animateFloat(
+        initialValue = 0.9f,
+        targetValue = 1.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
+    )
+
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.SpaceBetween,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // High-Contrast Alert Card
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .padding(vertical = 16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = memberColor.copy(alpha = 0.08f)
+            ),
+            shape = RoundedCornerShape(24.dp),
+            border = androidx.compose.foundation.BorderStroke(2.dp, memberColor)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.NotificationsActive,
+                    contentDescription = "Alarm Active Icon",
+                    tint = memberColor,
+                    modifier = Modifier
+                        .size(80.dp)
+                        .scale(scalePulse)
+                )
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                // First row (big and bold text) - [profile name]: [medication name]
+                Text(
+                    text = "$familyMemberName: ${reminder.medName}",
+                    style = MaterialTheme.typography.headlineLarge.copy(
+                        fontWeight = FontWeight.Black,
+                        fontSize = 32.sp,
+                        lineHeight = 38.sp
+                    ),
+                    color = memberColor,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.testTag("alarm_med_name")
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Second row (little and normal text) - [dosage]
+                Text(
+                    text = reminder.dosage,
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 18.sp
+                    ),
+                    color = memberColor.copy(alpha = 0.8f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.testTag("alarm_dosage")
+                )
+            }
+        }
+
+        // Action Buttons Area
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Action 2: Skip
+                OutlinedButton(
+                    onClick = {
+                        val svcIntent = Intent(context, MedicationAlarmService::class.java).apply {
+                            action = MedicationAlarmService.ACTION_SKIP
+                            putExtra("MED_ID", reminder.medId)
+                            putExtra("MED_NAME", reminder.medName)
+                            putExtra("MED_DOSAGE", reminder.dosage)
+                        }
+                        context.startService(svcIntent)
+                        onActionTaken()
+                    },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.error),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp)
+                        .testTag("alarm_action_skip"),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Block,
+                            contentDescription = "Block Icon"
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Skip",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                }
+
+                // Action 3: Snooze
+                FilledTonalButton(
+                    onClick = {
+                        val svcIntent = Intent(context, MedicationAlarmService::class.java).apply {
+                            action = MedicationAlarmService.ACTION_DISMISS
+                            putExtra("MED_ID", reminder.medId)
+                        }
+                        context.startService(svcIntent)
+                        onActionTaken()
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp)
+                        .testTag("alarm_action_dismiss"),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Alarm,
+                            contentDescription = "Alarm Dismiss Icon"
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Snooze",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                }
+            }
+
+            // Action 1: Taken
+            Button(
+                onClick = {
+                    val svcIntent = Intent(context, MedicationAlarmService::class.java).apply {
+                        action = MedicationAlarmService.ACTION_TAKE
+                        putExtra("MED_ID", reminder.medId)
+                        putExtra("MED_NAME", reminder.medName)
+                        putExtra("MED_DOSAGE", reminder.dosage)
+                    }
+                    context.startService(svcIntent)
+                    onActionTaken()
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = memberColor
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp)
+                    .testTag("alarm_action_take"),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = "Check Icon",
+                        tint = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Taken",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = Color.White
+                        )
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun MultiAlarmCard(
+    reminder: ActiveReminder,
+    onAction: (String) -> Unit
+) {
+    val context = LocalContext.current
+    var familyMemberName by remember { mutableStateOf("Me") }
+    var familyMemberColorHex by remember { mutableStateOf("#B00020") }
+
+    LaunchedEffect(reminder.familyMemberId) {
+        if (reminder.familyMemberId != -1L) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val db = AppDatabase.getDatabase(context)
+                    val member = db.dao().getFamilyMemberById(reminder.familyMemberId)
+                    if (member != null) {
+                        familyMemberName = member.name
+                        familyMemberColorHex = member.colorHex
+                    }
+                } catch (e: Exception) {}
+            }
+        }
+    }
+
+    val memberColor = remember(familyMemberColorHex) {
+        try {
+            Color(android.graphics.Color.parseColor(familyMemberColorHex))
+        } catch (e: Exception) {
+            Color.Red
+        }
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = memberColor.copy(alpha = 0.08f)
+        ),
+        shape = RoundedCornerShape(20.dp),
+        border = androidx.compose.foundation.BorderStroke(2.dp, memberColor)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "$familyMemberName: ${reminder.medName}",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Black),
+                        color = memberColor
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = reminder.dosage,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = memberColor.copy(alpha = 0.8f)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Individual Actions Area
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { onAction(MedicationAlarmService.ACTION_SKIP) },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(40.dp)
+                        .testTag("alarm_action_skip_${reminder.medId}"),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    Text("Skip", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
+                }
+
+                OutlinedButton(
+                    onClick = { onAction(MedicationAlarmService.ACTION_DISMISS) },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = memberColor
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, memberColor),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(40.dp)
+                        .testTag("alarm_action_dismiss_${reminder.medId}"),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    Text("Snooze", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
+                }
+
+                Button(
+                    onClick = { onAction(MedicationAlarmService.ACTION_TAKE) },
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = memberColor
+                    ),
+                    modifier = Modifier
+                        .weight(1.2f)
+                        .height(40.dp)
+                        .testTag("alarm_action_take_${reminder.medId}"),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    Text("Taken", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = Color.White)
                 }
             }
         }

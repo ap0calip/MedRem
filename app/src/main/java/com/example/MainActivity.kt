@@ -467,8 +467,8 @@ fun MedRedApp(
         AddFamilyProfileDialog(
             profiles = familyMembers,
             onDismiss = { showAddProfileDialog = false },
-            onSave = { name, colorHex ->
-                viewModel.addFamilyMember(name, colorHex)
+            onSave = { id, name, colorHex, isMe ->
+                viewModel.addOrUpdateFamilyMember(id ?: 0L, name, colorHex, isMe)
                 showAddProfileDialog = false
             },
             onDelete = { member ->
@@ -483,6 +483,7 @@ fun MedRedApp(
         AddEditMedicationScheduleDialog(
             medication = editingMed,
             profiles = familyMembers,
+            initialSelectedProfileId = selectedProfileId,
             onDismiss = { showAddMedicationDialog = false },
             onSave = { name, dosage, notes, schedType, days, hours, time, profileId, active ->
                 viewModel.addOrUpdateMedication(
@@ -929,9 +930,12 @@ fun DoseHistoryCard(
 fun AddFamilyProfileDialog(
     profiles: List<FamilyMember>,
     onDismiss: () -> Unit,
-    onSave: (name: String, colorHex: String) -> Unit,
+    onSave: (id: Long?, name: String, colorHex: String, isMe: Boolean) -> Unit,
     onDelete: (FamilyMember) -> Unit
 ) {
+    var editingProfileId by remember { mutableStateOf<Long?>(null) }
+    var editingProfileIsMe by remember { mutableStateOf(false) }
+
     var name by remember { mutableStateOf("") }
     var selectedColorIndex by remember { mutableStateOf(0) }
     var inlineErrorMsg by remember { mutableStateOf<String?>(null) }
@@ -964,7 +968,7 @@ fun AddFamilyProfileDialog(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Manage & Add Profiles",
+                    text = if (editingProfileId != null) "Edit Profile" else "Manage & Add Profiles",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
@@ -973,6 +977,31 @@ fun AddFamilyProfileDialog(
                 )
                 
                 Spacer(modifier = Modifier.height(16.dp))
+
+                if (editingProfileId != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Editing Mode",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                        TextButton(
+                            onClick = {
+                                editingProfileId = null
+                                editingProfileIsMe = false
+                                name = ""
+                                selectedColorIndex = 0
+                            }
+                        ) {
+                            Text("Switch to Create Profile")
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
                 
                 OutlinedTextField(
                     value = name,
@@ -1048,12 +1077,12 @@ fun AddFamilyProfileDialog(
                             if (name.trim().isEmpty()) {
                                 inlineErrorMsg = "Name cannot be empty!"
                             } else {
-                                onSave(name, colors[selectedColorIndex])
+                                onSave(editingProfileId, name, colors[selectedColorIndex], editingProfileIsMe)
                             }
                         },
                         modifier = Modifier.testTag("save_profile_button")
                     ) {
-                        Text("Save Profile")
+                        Text(if (editingProfileId != null) "Update Profile" else "Save Profile")
                     }
                 }
 
@@ -1099,6 +1128,29 @@ fun AddFamilyProfileDialog(
                             fontSize = 14.sp,
                             modifier = Modifier.weight(1f)
                         )
+                        
+                        IconButton(
+                            onClick = {
+                                editingProfileId = profile.id
+                                editingProfileIsMe = profile.isMe
+                                name = profile.name
+                                val idx = colors.indexOf(profile.colorHex)
+                                if (idx >= 0) {
+                                    selectedColorIndex = idx
+                                }
+                            },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("edit_profile_${profile.id}")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Edit Profile",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
                         if (!profile.isMe) {
                             IconButton(
                                 onClick = { onDelete(profile) },
@@ -1133,6 +1185,7 @@ fun AddFamilyProfileDialog(
 fun AddEditMedicationScheduleDialog(
     medication: Medication?,
     profiles: List<FamilyMember>,
+    initialSelectedProfileId: Long = 0L,
     onDismiss: () -> Unit,
     onSave: (
         name: String,
@@ -1174,7 +1227,11 @@ fun AddEditMedicationScheduleDialog(
     
     // Selected Profile FK
     var selectedProfileId by remember {
-        val defaultId = profiles.firstOrNull { it.isMe }?.id ?: profiles.firstOrNull()?.id ?: 0L
+        val defaultId = if (initialSelectedProfileId != 0L) {
+            initialSelectedProfileId
+        } else {
+            profiles.firstOrNull { it.isMe }?.id ?: profiles.firstOrNull()?.id ?: 0L
+        }
         mutableStateOf(medication?.familyMemberId ?: defaultId)
     }
 
@@ -1194,7 +1251,12 @@ fun AddEditMedicationScheduleDialog(
             checkedDays[day] = medication?.daysOfWeekCommaSeparated?.contains(day) ?: false
         }
         
-        selectedProfileId = medication?.familyMemberId ?: (profiles.firstOrNull { it.isMe }?.id ?: profiles.firstOrNull()?.id ?: 0L)
+        val defaultId = if (initialSelectedProfileId != 0L) {
+            initialSelectedProfileId
+        } else {
+            profiles.firstOrNull { it.isMe }?.id ?: profiles.firstOrNull()?.id ?: 0L
+        }
+        selectedProfileId = medication?.familyMemberId ?: defaultId
         
         nameError = null
         dosageError = null
@@ -1498,7 +1560,7 @@ fun AddEditMedicationScheduleDialog(
                                     }
                                 },
                                 label = { Text("Hour") },
-                                placeholder = { Text(if (is12Hour) "12" else "23") },
+                                placeholder = { Text("--") },
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("time_hour_input"),
@@ -1523,7 +1585,7 @@ fun AddEditMedicationScheduleDialog(
                                     }
                                 },
                                 label = { Text("Minute") },
-                                placeholder = { Text("30") },
+                                placeholder = { Text("--") },
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("time_minute_input"),
