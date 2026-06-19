@@ -200,7 +200,7 @@ class MedicationAlarmService : Service() {
 
     private suspend fun showForegroundNotification() {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val channelId = "medred_urgent_alarms"
+        val channelId = "medrem_urgent_alarms"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(

@@ -30,7 +30,7 @@ class GreetingScreenshotTest {
         Surface(color = MaterialTheme.colorScheme.background) {
           EmptyStateView(
             icon = Icons.Default.HealthAndSafety,
-            title = "MedRed Active Reminders",
+            title = "MedRem Active Reminders",
             description = "Start listing medication reminders for your family members today."
           )
         }

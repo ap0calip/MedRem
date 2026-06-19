@@ -1,11 +1,11 @@
-# Technical Specification: MedRed (Medication Reminder Application)
+# Technical Specification: MedRem (Medication Reminder Application)
 
-Welcome to the **MedRed Technical Specification**. This document outlines the system philosophy, database schema, background scheduling model, exact alarm protocols, and user interface traits of the MedRed application.
+Welcome to the **MedRem Technical Specification**. This document outlines the system philosophy, database schema, background scheduling model, exact alarm protocols, and user interface traits of the MedRem application.
 
 ---
 
 ## 1. System Philosophy & Objectives
-The key objective of MedRed is to provide an **offline-first, zero-latency, high-precision medication scheduling machine** that caters to both individuals and multi-member households. 
+The key objective of MedRem is to provide an **offline-first, zero-latency, high-precision medication scheduling machine** that caters to both individuals and multi-member households. 
 *   **Privacy & Local Preservation**: All profiles, medications, schedules, and compliance intake logs are saved locally using an embedded SQLite engine via Room. No profile data ever leaves the device.
 *   **Battery-Efficient Dispatch**: Utilizes precise wake alarms (`AlarmManager`) mapped directly to targeted system intent broadcasts to wake up the application only when a target dose window is reached.
 *   **Intent-Driven Filtering & Search**: An ergonomic, responsive single-screen dashboard layout that allows the user to search all active medication schedules and historical compliance statistics by profile tags and search keywords simultaneously.
@@ -92,7 +92,7 @@ The codebase adheres directly to the Android MVVM pattern, separating the applic
 ---
 
 ## 5. Alarm Scheduling Calculations & Precision
-To optimize battery life while maintaining reliable trigger precision, MedRed implements exact scheduling offsets:
+To optimize battery life while maintaining reliable trigger precision, MedRem implements exact scheduling offsets:
 
 ### A. Weekly Schedule Method
 Target hours and minutes are calculated based on user input. The application calculates the closest upcoming calendar day matching the selected active days list (e.g. `Mon`, `Wed`, `Fri`) starting from the baseline time.

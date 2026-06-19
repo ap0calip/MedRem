@@ -1,6 +1,6 @@
-# Architectural Layer Specification: MedRed
+# Architectural Layer Specification: MedRem
 
-This document outlines the system architectural design, package layers, and the component interaction flow of the MedRed application. MedRed follows a clean, modern Android **MVVM (Model-View-ViewModel)** pattern coupled with a unidirectional data flow (UDF).
+This document outlines the system architectural design, package layers, and the component interaction flow of the MedRem application. MedRem follows a clean, modern Android **MVVM (Model-View-ViewModel)** pattern coupled with a unidirectional data flow (UDF).
 
 ---
 

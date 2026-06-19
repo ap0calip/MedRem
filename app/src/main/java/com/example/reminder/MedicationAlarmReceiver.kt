@@ -87,7 +87,7 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
         familyMemberId: Long
     ) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val channelId = "medred_reminders"
+        val channelId = "medrem_reminders"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(

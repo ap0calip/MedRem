@@ -64,7 +64,7 @@ class MainActivity : ComponentActivity() {
                         .fillMaxSize()
                         .testTag("main_scaffold")
                 ) { innerPadding ->
-                    MedRedApp(innerPadding)
+                    MedRemApp(innerPadding)
                 }
             }
         }
@@ -72,7 +72,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun MedRedApp(
+fun MedRemApp(
     innerPadding: PaddingValues,
     viewModel: MedicationViewModel = viewModel()
 ) {
@@ -154,7 +154,7 @@ fun MedRedApp(
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "MedRed",
+                        text = "MedRem",
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
