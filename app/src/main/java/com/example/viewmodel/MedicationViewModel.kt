@@ -16,6 +16,15 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
+
+data class ImportResult(
+    val success: Boolean,
+    val importedProfilesCount: Int,
+    val importedMedicationsCount: Int,
+    val errorMessage: String? = null
+)
 
 class MedicationViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -197,6 +206,165 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
     fun deleteDoseRecord(recordId: Long) {
         viewModelScope.launch {
             repository.deleteDoseRecord(recordId)
+        }
+    }
+
+    fun exportSchedulesJson(profileId: Long?): String {
+        try {
+            val rootObj = JSONObject()
+            val profilesArr = JSONArray()
+            val medsArr = JSONArray()
+
+            val allMeds = allMedications.value
+            val allMembers = familyMembers.value
+
+            val filteredMembers = if (profileId == null || profileId == 0L) {
+                allMembers
+            } else {
+                allMembers.filter { it.id == profileId }
+            }
+
+            val filteredMeds = if (profileId == null || profileId == 0L) {
+                allMeds
+            } else {
+                allMeds.filter { it.familyMemberId == profileId }
+            }
+
+            filteredMembers.forEach { member ->
+                val mObj = JSONObject().apply {
+                    put("id", member.id)
+                    put("name", member.name)
+                    put("colorHex", member.colorHex)
+                    put("isMe", member.isMe)
+                }
+                profilesArr.put(mObj)
+            }
+
+            filteredMeds.forEach { med ->
+                val medObj = JSONObject().apply {
+                    put("id", med.id)
+                    put("name", med.name)
+                    put("dosage", med.dosage)
+                    put("instructions", med.instructions)
+                    put("scheduleType", med.scheduleType)
+                    put("daysOfWeekCommaSeparated", med.daysOfWeekCommaSeparated)
+                    put("intervalHours", med.intervalHours)
+                    put("startTime", med.startTime)
+                    put("startDate", med.startDate)
+                    put("familyMemberId", med.familyMemberId)
+                    put("isActive", med.isActive)
+                    put("snoozedUntil", med.snoozedUntil)
+                    put("lastLoggedTime", med.lastLoggedTime)
+                }
+                medsArr.put(medObj)
+            }
+
+            rootObj.put("profiles", profilesArr)
+            rootObj.put("medications", medsArr)
+            return rootObj.toString(2)
+        } catch (e: Exception) {
+            Log.e("MedicationViewModel", "Failed to export JSON: ${e.message}", e)
+            return "{\"error\": \"Export failed: ${e.message}\"}"
+        }
+    }
+
+    fun importSchedulesJson(jsonStr: String, onComplete: (ImportResult) -> Unit) {
+        viewModelScope.launch {
+            try {
+                if (jsonStr.isBlank()) {
+                    onComplete(ImportResult(false, 0, 0, "Input is empty"))
+                    return@launch
+                }
+
+                val rootObj = JSONObject(jsonStr)
+                val profilesArr = rootObj.optJSONArray("profiles") ?: JSONArray()
+                val medsArr = rootObj.optJSONArray("medications") ?: JSONArray()
+
+                var importedProfiles = 0
+                var importedMeds = 0
+
+                val profileIdMap = mutableMapOf<Long, Long>()
+
+                // 1. Process profiles / family members
+                for (i in 0 until profilesArr.length()) {
+                    val mObj = profilesArr.getJSONObject(i)
+                    val origId = mObj.getLong("id")
+                    val name = mObj.getString("name").trim()
+                    val colorHex = mObj.optString("colorHex", "#2196F3")
+                    val isMe = mObj.optBoolean("isMe", false)
+
+                    // Check if already exists by name
+                    val existing = familyMembers.value.find { it.name.equals(name, ignoreCase = true) }
+                    if (existing != null) {
+                        profileIdMap[origId] = existing.id
+                    } else {
+                        val newMember = FamilyMember(name = name, colorHex = colorHex, isMe = isMe)
+                        val newId = repository.insertFamilyMember(newMember)
+                        profileIdMap[origId] = newId
+                        importedProfiles++
+                    }
+                }
+
+                // Default family member fallback if map fails
+                val defaultFamilyId = familyMembers.value.firstOrNull()?.id ?: 1L
+
+                // 2. Process medications
+                for (i in 0 until medsArr.length()) {
+                    val medObj = medsArr.getJSONObject(i)
+                    val name = medObj.getString("name").trim()
+                    val dosage = medObj.getString("dosage").trim()
+                    val instructions = medObj.optString("instructions", "").trim()
+                    val scheduleType = medObj.getString("scheduleType")
+                    val daysOfWeekCommaSeparated = medObj.optString("daysOfWeekCommaSeparated", "")
+                    val intervalHours = medObj.optInt("intervalHours", 0)
+                    val startTime = medObj.getString("startTime")
+                    val startDate = medObj.optLong("startDate", System.currentTimeMillis())
+                    val origFamilyMemberId = medObj.getLong("familyMemberId")
+                    val isActive = medObj.optBoolean("isActive", true)
+                    val snoozedUntil = medObj.optLong("snoozedUntil", 0L)
+                    val lastLoggedTime = medObj.optLong("lastLoggedTime", 0L)
+
+                    val mappedFamilyMemberId = profileIdMap[origFamilyMemberId] ?: defaultFamilyId
+
+                    // Check if identical medication schedule already exists for this member to avoid spamming duplicates
+                    val duplicate = allMedications.value.find {
+                        it.familyMemberId == mappedFamilyMemberId &&
+                                it.name.equals(name, ignoreCase = true) &&
+                                it.dosage.equals(dosage, ignoreCase = true) &&
+                                it.scheduleType == scheduleType &&
+                                it.startTime == startTime
+                    }
+
+                    if (duplicate == null) {
+                        val medInstance = Medication(
+                            name = name,
+                            dosage = dosage,
+                            instructions = instructions,
+                            scheduleType = scheduleType,
+                            daysOfWeekCommaSeparated = daysOfWeekCommaSeparated,
+                            intervalHours = intervalHours,
+                            startTime = startTime,
+                            startDate = startDate,
+                            familyMemberId = mappedFamilyMemberId,
+                            isActive = isActive,
+                            snoozedUntil = snoozedUntil,
+                            lastLoggedTime = lastLoggedTime
+                        )
+                        val newMedId = repository.insertMedication(medInstance)
+                        val insertedMed = medInstance.copy(id = newMedId)
+
+                        if (insertedMed.isActive) {
+                            ReminderScheduler.scheduleAlarm(getApplication(), insertedMed)
+                        }
+                        importedMeds++
+                    }
+                }
+
+                onComplete(ImportResult(true, importedProfiles, importedMeds))
+            } catch (e: Exception) {
+                Log.e("MedicationViewModel", "Failed to import JSON: ${e.message}", e)
+                onComplete(ImportResult(false, 0, 0, "Failed to parse backup metadata: ${e.localizedMessage}"))
+            }
         }
     }
 }

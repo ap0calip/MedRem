@@ -134,7 +134,78 @@ All interactive components are fully configured:
 
 ---
 
-## 8. Development Verification Tasks
+## 8. Backup & Restore Data Specification
+
+To facilitate medication schedule continuity across devices or profiles, MedRem features a complete non-relational serialization and structural restoration system.
+
+### A. JSON Backup Schema
+All data is bundled into a standardized JSON payload structure representing family profiles and medication schedules concurrently:
+```json
+{
+  "profiles": [
+    {
+      "id": 1,
+      "name": "Alex",
+      "colorHex": "#2196F3",
+      "isMe": false
+    }
+  ],
+  "medications": [
+    {
+      "id": 12,
+      "name": "B12 Vitamin",
+      "dosage": "1 Tablet",
+      "instructions": "With breakfast",
+      "scheduleType": "INTERVAL",
+      "daysOfWeekCommaSeparated": "",
+      "intervalHours": 24,
+      "startTime": "08:00",
+      "startDate": 1718912400000,
+      "familyMemberId": 1,
+      "isActive": true,
+      "snoozedUntil": 0,
+      "lastLoggedTime": 0
+    }
+  ]
+}
+```
+
+### B. Logical Mapping & Id Resolution Strategy
+1. **Profile Duplication Shielding**: When importing a payload, profiles are matched by name (case-insensitive) against existing database entries. If they exist, the system logs the target `familyMemberId` to mapped registers; if not, a new profile is inserted and a dynamic ID reference is assigned.
+2. **Medication Duplication Validation**: Before inserting newly imported schedules, the system verifies uniqueness by comparing medication attributes (`name`, `dosage`, `scheduleType`, `startTime`, and resolved `familyMemberId`). Identical duplicates are ignored to avoid cluttering schedules.
+3. **Automatic Alarm Registration**: For each newly imported medication that is marked `isActive`, the system immediately schedules high-precision alarms on the device.
+
+---
+
+## 9. Active Alarm Safeguards & Dashboard Banner
+
+In healthcare reminders, an active medication alarm must never be lost, blocked, or become impossible to deactivate.
+
+### A. The Hidden Alarm Problem
+If a user closes, swipess away, or hides the lockscreen `AlarmActivity` window without taking action (Taken, Snooze, Skip), the ringing notification or background service may continue running in a half-active state, leaving with no direct UI affordances to shut off the alarm loop.
+
+### B. Failsafe Active Alarms Widget
+MedRem solves this with the **Active Alarms Banner**:
+*   **Observation**: A hot flow monitors the global `ActiveAlarmManager.activeAlarms` list directly from `MedicationAlarmService`.
+*   **Persistent Dashboard Visibility**: If any alarms are currently active and shouting, a highly noticeable animated pulse banner docks continuously at the top of the central dashboard.
+*   **Double Layer Interface**: Displays individual details for every active medication alarm paired with independent action buttons:
+    *   **Taken**: Logs the medication, cancels its alarm sound loop immediately, and schedules the next normal window.
+    *   **Snooze**: Postpones the alarm trigger for exactly 30 minutes.
+    *   **Skip**: Logs a skipped dose record and stops the active alarm.
+*   **Bulk Operations**: When multiple reminder schedules trigger back-to-back, the banner exposes unified **Take All Due** and **Snooze All** bulk operations.
+
+---
+
+## 10. Profile Deletion Warning Protocol
+
+To prevent catastrophic deletion of family profiles and critical medication reminder rules, a defensive interface wrapper is enforced.
+*   **Dismissable Confirmations**: Attempting to delete a profile does not perform instant database drops.
+*   **Aesthetic Alert Modals**: Triggers a Material 3 warning container summarizing side effects (loss of historic reports representation and medication scheduling routines).
+*   **Safe Execution**: Only executing a voluntary selection of the destructive trigger launches Room cascading deletion actions.
+
+---
+
+## 11. Development Verification Tasks
 To verify complete compilation and execute Robolectric unit/screenshot regressions locally, engineers can utilize Gradle commands:
 
 ```bash

@@ -2,6 +2,7 @@ package com.example
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -12,6 +13,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -90,6 +92,7 @@ fun MedRemApp(
     // UI control states
     var showAddMedicationDialog by remember { mutableStateOf(false) }
     var showAddProfileDialog by remember { mutableStateOf(false) }
+    var showDataTransferDialog by remember { mutableStateOf(false) }
     var medicationToEdit by remember { mutableStateOf<Medication?>(null) }
     
     // Active navigation tab (0 = Medications, 1 = Dose History)
@@ -162,17 +165,35 @@ fun MedRemApp(
                     )
                 }
                 
-                // Button to create a custom Family Profile
-                TextButton(
-                    onClick = { showAddProfileDialog = true },
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary),
-                    modifier = Modifier.testTag("add_profile_button")
-                ) {
-                    Icon(imageVector = Icons.Default.PersonAdd, contentDescription = "Add Profile")
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Add Profile", fontSize = 14.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Button to create a custom Family Profile
+                    TextButton(
+                        onClick = { showAddProfileDialog = true },
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.testTag("add_profile_button")
+                    ) {
+                        Icon(imageVector = Icons.Default.PersonAdd, contentDescription = "Add Profile")
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Add Profile", fontSize = 14.sp)
+                    }
+
+                    Spacer(modifier = Modifier.width(2.dp))
+
+                    IconButton(
+                        onClick = { showDataTransferDialog = true },
+                        modifier = Modifier.testTag("data_transfer_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ImportExport,
+                            contentDescription = "Import/Export Schedules",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
             }
+
+            // --- ACTIVE ALARMS RUNNING BANNER ---
+            ActiveAlarmsBanner(viewModel = viewModel)
 
             // --- PROFILES FILTER TAG REGION (Unified View) ---
             Text(
@@ -501,6 +522,13 @@ fun MedRemApp(
                 )
                 showAddMedicationDialog = false
             }
+        )
+    }
+
+    if (showDataTransferDialog) {
+        DataTransferDialog(
+            viewModel = viewModel,
+            onDismiss = { showDataTransferDialog = false }
         )
     }
 }
@@ -939,6 +967,7 @@ fun AddFamilyProfileDialog(
     var name by remember { mutableStateOf("") }
     var selectedColorIndex by remember { mutableStateOf(0) }
     var inlineErrorMsg by remember { mutableStateOf<String?>(null) }
+    var profileToDelete by remember { mutableStateOf<FamilyMember?>(null) }
 
     // Hex codes for selecting colored tags
     val colors = listOf(
@@ -1153,7 +1182,7 @@ fun AddFamilyProfileDialog(
 
                         if (!profile.isMe) {
                             IconButton(
-                                onClick = { onDelete(profile) },
+                                onClick = { profileToDelete = profile },
                                 modifier = Modifier
                                     .size(36.dp)
                                     .testTag("delete_profile_${profile.id}")
@@ -1176,6 +1205,34 @@ fun AddFamilyProfileDialog(
                 }
             }
         }
+    }
+
+    if (profileToDelete != null) {
+        val member = profileToDelete
+        AlertDialog(
+            onDismissRequest = { profileToDelete = null },
+            title = { Text("Delete Family Profile?") },
+            text = { Text("Are you sure you want to delete the profile for \"${member?.name}\"? All their history will remain but the profile itself will be removed. Action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        member?.let { onDelete(it) }
+                        profileToDelete = null
+                    },
+                    modifier = Modifier.testTag("confirm_delete_profile_button")
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { profileToDelete = null },
+                    modifier = Modifier.testTag("cancel_delete_profile_button")
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 }
 
@@ -1721,6 +1778,528 @@ fun AddEditMedicationScheduleDialog(
                             Text(if (medication == null) "Create Schedule" else "Save Changes")
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ActiveAlarmsBanner(
+    modifier: Modifier = Modifier,
+    viewModel: MedicationViewModel
+) {
+    val context = LocalContext.current
+    val activeAlarms by com.example.reminder.ActiveAlarmManager.activeAlarms.collectAsState()
+    val familyMembers by viewModel.familyMembers.collectAsState()
+
+    if (activeAlarms.isEmpty()) return
+
+    val defaultErrorColor = MaterialTheme.colorScheme.error
+
+    // Elegant animated pulsator for active banner
+    val infiniteTransition = rememberInfiniteTransition(label = "banner_p")
+    val alphaColorMultiplier by infiniteTransition.animateFloat(
+        initialValue = 0.05f,
+        targetValue = 0.18f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "banner_p"
+    )
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .testTag("active_alarms_banner"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = defaultErrorColor.copy(alpha = alphaColorMultiplier)
+        ),
+        border = androidx.compose.foundation.BorderStroke(2.dp, defaultErrorColor.copy(alpha = 0.6f))
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Title block
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.NotificationsActive,
+                    contentDescription = "Active alarms screaming",
+                    tint = defaultErrorColor,
+                    modifier = Modifier.size(24.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "ACTIVE MEDICAL ALARMS:",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = defaultErrorColor
+                )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Alarm items
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                activeAlarms.forEach { alarm ->
+                    val member = familyMembers.find { it.id == alarm.familyMemberId }
+                    val memberName = member?.name ?: "Me"
+                    val memberColorHex = member?.colorHex ?: "#B00020"
+                    val parsedColor = remember(memberColorHex) {
+                        try { Color(android.graphics.Color.parseColor(memberColorHex)) }
+                        catch (e: Exception) { defaultErrorColor }
+                    }
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, parsedColor.copy(alpha = 0.5f))
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(12.dp)
+                        ) {
+                            Text(
+                                text = "$memberName: ${alarm.medName}",
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                                color = parsedColor
+                            )
+                            if (alarm.dosage.isNotEmpty()) {
+                                Text(
+                                    text = alarm.dosage,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Individual action buttons
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                // Taken Button
+                                Button(
+                                    onClick = {
+                                        val svcIntent = Intent(context, com.example.reminder.MedicationAlarmService::class.java).apply {
+                                            action = com.example.reminder.MedicationAlarmService.ACTION_TAKE
+                                            putExtra("MED_ID", alarm.medId)
+                                            putExtra("MED_NAME", alarm.medName)
+                                            putExtra("MED_DOSAGE", alarm.dosage)
+                                        }
+                                        context.startService(svcIntent)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = parsedColor),
+                                    modifier = Modifier.weight(1f).height(38.dp).testTag("banner_action_take_${alarm.medId}"),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Icon(Icons.Default.Check, "Taken", tint = Color.White, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Taken", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                }
+
+                                // Snooze Button
+                                OutlinedButton(
+                                    onClick = {
+                                        val svcIntent = Intent(context, com.example.reminder.MedicationAlarmService::class.java).apply {
+                                            action = com.example.reminder.MedicationAlarmService.ACTION_DISMISS
+                                            putExtra("MED_ID", alarm.medId)
+                                        }
+                                        context.startService(svcIntent)
+                                    },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+                                    modifier = Modifier.weight(1.0f).height(38.dp).testTag("banner_action_snooze_${alarm.medId}"),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Icon(Icons.Default.Alarm, "Snooze", modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Snooze", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                // Skip Button
+                                OutlinedButton(
+                                    onClick = {
+                                        val svcIntent = Intent(context, com.example.reminder.MedicationAlarmService::class.java).apply {
+                                            action = com.example.reminder.MedicationAlarmService.ACTION_SKIP
+                                            putExtra("MED_ID", alarm.medId)
+                                            putExtra("MED_NAME", alarm.medName)
+                                            putExtra("MED_DOSAGE", alarm.dosage)
+                                        }
+                                        context.startService(svcIntent)
+                                    },
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = defaultErrorColor),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, defaultErrorColor.copy(alpha = 0.5f)),
+                                    modifier = Modifier.weight(1f).height(38.dp).testTag("banner_action_skip_${alarm.medId}"),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                                ) {
+                                    Icon(Icons.Default.Block, "Skip", modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Skip", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (activeAlarms.size > 1) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            val svcIntent = Intent(context, com.example.reminder.MedicationAlarmService::class.java).apply {
+                                action = com.example.reminder.MedicationAlarmService.ACTION_TAKE_ALL
+                            }
+                            context.startService(svcIntent)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = defaultErrorColor),
+                        modifier = Modifier.weight(1f).height(44.dp).testTag("banner_action_take_all"),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Take All Due", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
+
+                    OutlinedButton(
+                        onClick = {
+                            val svcIntent = Intent(context, com.example.reminder.MedicationAlarmService::class.java).apply {
+                                action = com.example.reminder.MedicationAlarmService.ACTION_DISMISS_ALL
+                            }
+                            context.startService(svcIntent)
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = defaultErrorColor),
+                        border = androidx.compose.foundation.BorderStroke(1.5.dp, defaultErrorColor),
+                        modifier = Modifier.weight(1f).height(44.dp).testTag("banner_action_snooze_all"),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("Snooze All", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DataTransferDialog(
+    viewModel: MedicationViewModel,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var activeTab by remember { mutableStateOf(0) } // 0 = Export, 1 = Import
+
+    // --- Export states ---
+    var selectedExportProfileId by remember { mutableStateOf(0L) } // 0 = All Profiles
+    val familyMembers by viewModel.familyMembers.collectAsState()
+
+    // --- Import states ---
+    var importText by remember { mutableStateOf("") }
+    var importPreviewProfilesCount by remember { mutableStateOf(0) }
+    var importPreviewMedsCount by remember { mutableStateOf(0) }
+    var importValidationErrorMsg by remember { mutableStateOf<String?>(null) }
+    var hasParsedSuccessfully by remember { mutableStateOf(false) }
+
+    // Logic to validate live input in real-time
+    LaunchedEffect(importText) {
+        if (importText.isBlank()) {
+            importValidationErrorMsg = null
+            importPreviewProfilesCount = 0
+            importPreviewMedsCount = 0
+            hasParsedSuccessfully = false
+            return@LaunchedEffect
+        }
+        try {
+            val rootObj = org.json.JSONObject(importText)
+            val pArr = rootObj.optJSONArray("profiles") ?: org.json.JSONArray()
+            val mArr = rootObj.optJSONArray("medications") ?: org.json.JSONArray()
+            importPreviewProfilesCount = pArr.length()
+            importPreviewMedsCount = mArr.length()
+            importValidationErrorMsg = null
+            hasParsedSuccessfully = true
+        } catch (e: Exception) {
+            importValidationErrorMsg = "Invalid JSON data: ${e.localizedMessage}"
+            importPreviewProfilesCount = 0
+            importPreviewMedsCount = 0
+            hasParsedSuccessfully = false
+        }
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Card(
+            shape = RoundedCornerShape(24.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .testTag("data_transfer_dialog"),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(24.dp)
+                    .fillMaxWidth()
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ImportExport,
+                        contentDescription = "Data Transfer Icon",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Backup & Restore",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Custom Tab Row
+                TabRow(
+                    selectedTabIndex = activeTab,
+                    containerColor = Color.Transparent,
+                    divider = { HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f)) }
+                ) {
+                    Tab(
+                        selected = activeTab == 0,
+                        onClick = { activeTab = 0 },
+                        text = { Text("Export Schedules", fontWeight = FontWeight.Bold) }
+                    )
+                    Tab(
+                        selected = activeTab == 1,
+                        onClick = { activeTab = 1 },
+                        text = { Text("Import Backup", fontWeight = FontWeight.Bold) }
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                if (activeTab == 0) {
+                    // EXPORT TAB UI
+                    Text(
+                        text = "Transfer medication schedules and profile details as a secure JSON package.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+
+                    // Target profile option
+                    Text(
+                        text = "Target Profile Scope:",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    LazyRow(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        item {
+                            val isSelected = selectedExportProfileId == 0L
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { selectedExportProfileId = 0L },
+                                label = { Text("All Profiles") }
+                            )
+                        }
+                        items(familyMembers, key = { "exp_${it.id}" }) { member ->
+                            val isSelected = selectedExportProfileId == member.id
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { selectedExportProfileId = member.id },
+                                label = { Text(member.name) }
+                            )
+                        }
+                    }
+
+                    // Export triggers
+                    Button(
+                        onClick = {
+                            val profileFilter = if (selectedExportProfileId == 0L) null else selectedExportProfileId
+                            val jsonString = viewModel.exportSchedulesJson(profileFilter)
+
+                            // Copy to clipboard
+                            val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                            if (clipboardManager != null) {
+                                val clipData = android.content.ClipData.newPlainText("MedRem Alarms Export", jsonString)
+                                clipboardManager.setPrimaryClip(clipData)
+                                Toast.makeText(context, "Schedules copied to clipboard!", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().height(48.dp).testTag("copy_export_json_button"),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.ContentCopy, "Copy icon")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Copy Export JSON to Clipboard", fontWeight = FontWeight.Bold)
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    OutlinedButton(
+                        onClick = {
+                            val profileFilter = if (selectedExportProfileId == 0L) null else selectedExportProfileId
+                            val jsonString = viewModel.exportSchedulesJson(profileFilter)
+
+                            // Launch Android share sheet
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = "application/json"
+                                putExtra(Intent.EXTRA_SUBJECT, "MedRem Schedules Backup")
+                                putExtra(Intent.EXTRA_TEXT, jsonString)
+                            }
+                            context.startActivity(Intent.createChooser(shareIntent, "Share Backup JSON"))
+                        },
+                        modifier = Modifier.fillMaxWidth().height(48.dp).testTag("share_export_json_button"),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Share, "Share icon")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Share Backup Package", fontWeight = FontWeight.Bold)
+                    }
+
+                } else {
+                    // IMPORT TAB UI
+                    Text(
+                        text = "Paste your backup JSON package below to restore profiles and schedule reminders.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
+                    // Clipboard Quick paste action
+                    Button(
+                        onClick = {
+                            val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                            val itemText = clipboardManager?.primaryClip?.getItemAt(0)?.text?.toString()
+                            if (!itemText.isNullOrBlank()) {
+                                importText = itemText
+                                Toast.makeText(context, "Clipboard content pasted!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Clipboard is empty!", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), contentColor = MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.ContentPaste, "Paste icon")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Quick Paste from Clipboard", fontWeight = FontWeight.Bold)
+                    }
+
+                    OutlinedTextField(
+                        value = importText,
+                        onValueChange = { importText = it },
+                        placeholder = { Text("Paste JSON payload structure...") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(160.dp)
+                            .testTag("import_text_field"),
+                        maxLines = 15,
+                        textStyle = MaterialTheme.typography.bodySmall,
+                        shape = RoundedCornerShape(12.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Realtime verification indicator block
+                    if (importValidationErrorMsg != null) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                        ) {
+                            Text(
+                                text = importValidationErrorMsg ?: "",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    } else if (hasParsedSuccessfully) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = "✓ Backup verified!",
+                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Text(
+                                    text = "- Found profiles: $importPreviewProfilesCount\n- Found medications: $importPreviewMedsCount",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                    }
+
+                    // Action proceed trigger
+                    Button(
+                        onClick = {
+                            viewModel.importSchedulesJson(importText) { result ->
+                                if (result.success) {
+                                    Toast.makeText(
+                                        context,
+                                        "Import successful! Added ${result.importedProfilesCount} profile(s) and ${result.importedMedicationsCount} schedule(s).",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    onDismiss()
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        result.errorMessage ?: "Failed to import schedule bundle",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                }
+                            }
+                        },
+                        enabled = hasParsedSuccessfully,
+                        modifier = Modifier.fillMaxWidth().height(48.dp).testTag("execute_import_button"),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Icon(Icons.Default.Check, "Import icon")
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Proceed and Import Bundle", fontWeight = FontWeight.Bold)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Dismiss button
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.align(Alignment.End).testTag("close_transfer_dialog_button")
+                ) {
+                    Text("Close")
                 }
             }
         }
