@@ -1,6 +1,19 @@
 # Technical Specification: MedRem (Medication Reminder Application)
 
-Welcome to the **MedRem Technical Specification**. This document outlines the system philosophy, database schema, background scheduling model, exact alarm protocols, and user interface traits of the MedRem application.
+Welcome to the **MedRem Technical Specification**. This document outlines the simple user-facing overview, system philosophy, database schema, background scheduling model, exact alarm protocols, and user interface traits of the MedRem application.
+
+---
+
+## 0. Simple Application Overview
+
+**MedRem** is a simple, easy-to-use medication reminder application designed for individual and family use. The application operates entirely offline, keeping your health schedules and history strictly private on your device. It ensures you never miss a dose, whether you are managing your own daily vitamins or tracking multiple complex medications for several family members. With a clean, modern, and friendly layout, MedRem takes the complexity out of healthcare schedules and simplifies wellness management.
+
+### Key Features
+1. **Multi-Member Family Profiles**: Easily create and manage custom color-coded profiles for every family member. Filter your dashboard with a single tap to view only one person's schedules and history.
+2. **Flexible & Smart Reminders**: Schedule reminders for specific days of the week (e.g., every Monday, Wednesday, and Friday) or set repeating reminders at regular intervals (e.g., every 8 hours).
+3. **Fail-safe Persistent Alarms & Snooze**: Alarms play high-priority tones and vibrate until addressed. A persistent dashboard banner displays all active alarms so you can quickly mark doses as **Taken**, **Snooze** them for 30 minutes, or **Skip** them.
+4. **Interactive Dashboard Search & Filter**: Quickly find any medication or view specific historical doses across any profile using a combined live keyword search and family member filter.
+5. **Simple Data Backup & Restore**: Securely export all family profiles and medication schedules into a single, shareable backup file, and seamlessly restore them on another device without any setup hassle.
 
 ---
 
