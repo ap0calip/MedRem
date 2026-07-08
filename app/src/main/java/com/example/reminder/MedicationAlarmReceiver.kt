@@ -10,6 +10,7 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
+import com.example.R
 import com.example.data.database.AppDatabase
 import com.example.data.entity.DoseRecord
 import kotlinx.coroutines.CoroutineScope
@@ -92,10 +93,10 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
-                "Medication Reminders",
+                context.getString(R.string.notification_channel_reminders_name),
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Urgent notifications for medicine schedule intake times."
+                description = context.getString(R.string.notification_channel_reminders_desc)
                 enableVibration(true)
             }
             notificationManager.createNotificationChannel(channel)
@@ -149,8 +150,8 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
                 .setAutoCancel(true)
                 .setContentIntent(mainPendingIntent)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
-                .addAction(android.R.drawable.checkbox_on_background, "Taken", takePendingIntent)
-                .addAction(android.R.drawable.ic_lock_idle_alarm, "Snooze", snoozePendingIntent)
+                .addAction(android.R.drawable.checkbox_on_background, context.getString(R.string.notification_action_taken), takePendingIntent)
+                .addAction(android.R.drawable.ic_lock_idle_alarm, context.getString(R.string.notification_action_snooze), snoozePendingIntent)
 
             try {
                 builder.setColor(android.graphics.Color.parseColor(profileColorHex))
@@ -162,14 +163,14 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
         }
 
         // Post placeholder immediately
-        buildAndPost("Me", "#B00020")
+        buildAndPost(context.getString(R.string.notification_default_profile_name), "#B00020")
 
         // Look up profile details off-thread
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val db = AppDatabase.getDatabase(context)
                 val member = db.dao().getFamilyMemberById(familyMemberId)
-                val profileName = member?.name ?: "Me"
+                val profileName = member?.name ?: context.getString(R.string.notification_default_profile_name)
                 val profileColorHex = member?.colorHex ?: "#B00020"
                 buildAndPost(profileName, profileColorHex)
             } catch (e: Exception) {

@@ -38,7 +38,8 @@ data class Medication(
     val familyMemberId: Long,
     val isActive: Boolean = true,
     val snoozedUntil: Long = 0L,
-    val lastLoggedTime: Long = 0L
+    val lastLoggedTime: Long = 0L,
+    val autoReset: Boolean = false
 )
 
 @Entity(tableName = "dose_records")

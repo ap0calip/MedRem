@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import com.example.R
 import com.example.data.database.AppDatabase
 import com.example.data.entity.DoseRecord
 import kotlinx.coroutines.CoroutineScope
@@ -33,20 +34,31 @@ object ActiveAlarmManager {
     val activeAlarms = kotlinx.coroutines.flow.MutableStateFlow<List<ActiveReminder>>(emptyList())
 
     fun addAlarm(reminder: ActiveReminder) {
-        val current = activeAlarms.value.toMutableList()
-        if (current.none { it.medId == reminder.medId }) {
-            current.add(reminder)
-            activeAlarms.value = current
-            Log.d("ActiveAlarmManager", "Added alarm: ${reminder.medName}, total: ${activeAlarms.value.size}")
+        synchronized(this) {
+            val current = activeAlarms.value.toMutableList()
+            if (current.none { it.medId == reminder.medId }) {
+                current.add(reminder)
+                activeAlarms.value = current
+                Log.d("ActiveAlarmManager", "Added alarm: ${reminder.medName}, total: ${current.size}")
+            }
         }
     }
 
     fun removeAlarm(medId: Long) {
-        val current = activeAlarms.value.toMutableList()
-        val removed = current.removeAll { it.medId == medId }
-        if (removed) {
-            activeAlarms.value = current
-            Log.d("ActiveAlarmManager", "Removed alarm ID: $medId, total: ${activeAlarms.value.size}")
+        synchronized(this) {
+            val current = activeAlarms.value.toMutableList()
+            val removed = current.removeAll { it.medId == medId }
+            if (removed) {
+                activeAlarms.value = current
+                Log.d("ActiveAlarmManager", "Removed alarm ID: $medId, total: ${current.size}")
+            }
+        }
+    }
+
+    fun clearAlarms() {
+        synchronized(this) {
+            activeAlarms.value = emptyList()
+            Log.d("ActiveAlarmManager", "Cleared all alarms")
         }
     }
 }
@@ -199,16 +211,40 @@ class MedicationAlarmService : Service() {
     }
 
     private suspend fun showForegroundNotification() {
+        val prefs = getSharedPreferences("MedRemPrefs", Context.MODE_PRIVATE)
+        val labelMode = prefs.getString("label_mode", "ITEM") ?: "ITEM"
+
+        val medicationSing = when (labelMode) {
+            "MEDICATION" -> "Medication"
+            "ITEM" -> "Item"
+            "CUSTOM" -> prefs.getString("custom_med_sing", "Medication") ?: "Medication"
+            else -> "Medication"
+        }
+
+        val medicationPlur = when (labelMode) {
+            "MEDICATION" -> "Medications"
+            "ITEM" -> "Items"
+            "CUSTOM" -> prefs.getString("custom_med_plur", "Medications") ?: "Medications"
+            else -> "Medications"
+        }
+
+        val takenLabel = when (labelMode) {
+            "MEDICATION" -> "Taken"
+            "ITEM" -> "Completed"
+            "CUSTOM" -> prefs.getString("custom_taken_label", "Taken") ?: "Taken"
+            else -> "Taken"
+        }
+
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val channelId = "medrem_urgent_alarms"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
-                "Medication Alarms",
+                "$medicationSing Alarms",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "High-priority alarms with sound and visual overlays."
+                description = "High-priority $medicationPlur alarms with sound and visual overlays."
                 enableVibration(true)
                 setBypassDnd(true)
             }
@@ -244,7 +280,7 @@ class MedicationAlarmService : Service() {
         if (list.size == 1) {
             val rem = list.first()
             val member = db.dao().getFamilyMemberById(rem.familyMemberId)
-            val profileName = member?.name ?: "Me"
+            val profileName = member?.name ?: getString(R.string.notification_default_profile_name)
             val profileColorHex = member?.colorHex ?: "#B00020"
 
             builder.setContentTitle("$profileName: ${rem.medName}")
@@ -277,16 +313,16 @@ class MedicationAlarmService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            builder.addAction(android.R.drawable.checkbox_on_background, "Taken", takePendingIntent)
-            builder.addAction(android.R.drawable.ic_lock_idle_alarm, "Snooze", snoozePendingIntent)
+            builder.addAction(android.R.drawable.checkbox_on_background, takenLabel, takePendingIntent)
+            builder.addAction(android.R.drawable.ic_lock_idle_alarm, getString(R.string.notification_action_snooze), snoozePendingIntent)
         } else {
             // Find all unique profile names for the active reminders
             val profileNames = list.map { rem ->
-                db.dao().getFamilyMemberById(rem.familyMemberId)?.name ?: "Me"
+                db.dao().getFamilyMemberById(rem.familyMemberId)?.name ?: getString(R.string.notification_default_profile_name)
             }.distinct()
 
             val namesLabel = if (profileNames.isEmpty()) {
-                "Me"
+                getString(R.string.notification_default_profile_name)
             } else if (profileNames.size == 1) {
                 profileNames.first()
             } else if (profileNames.size == 2) {
@@ -295,9 +331,9 @@ class MedicationAlarmService : Service() {
                 profileNames.joinToString(", ")
             }
 
-            builder.setContentTitle("$namesLabel: Multiple Medications Due")
+            builder.setContentTitle("$namesLabel: Multiple $medicationPlur Due")
             val names = list.joinToString(", ") { it.medName }
-            builder.setContentText("${list.size} medications can be taken: $names")
+            builder.setContentText("${list.size} $medicationPlur can be $takenLabel: $names")
 
             val takeAllIntent = Intent(this, MedicationAlarmService::class.java).apply {
                 action = ACTION_TAKE_ALL
@@ -319,8 +355,8 @@ class MedicationAlarmService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            builder.addAction(android.R.drawable.checkbox_on_background, "Taken All", takeAllPendingIntent)
-            builder.addAction(android.R.drawable.ic_lock_idle_alarm, "Snooze All", snoozeAllPendingIntent)
+            builder.addAction(android.R.drawable.checkbox_on_background, "$takenLabel All", takeAllPendingIntent)
+            builder.addAction(android.R.drawable.ic_lock_idle_alarm, getString(R.string.notification_action_snooze_all), snoozeAllPendingIntent)
         }
 
         val notification = builder.build()
@@ -346,7 +382,7 @@ class MedicationAlarmService : Service() {
 
                 if (action == ACTION_TAKE_ALL) {
                     val alarmsToHandle = ActiveAlarmManager.activeAlarms.value.toList()
-                    ActiveAlarmManager.activeAlarms.value = emptyList() // clear immediately
+                    ActiveAlarmManager.clearAlarms() // clear immediately
 
                     alarmsToHandle.forEach { rem ->
                         val medication = dao.getMedicationById(rem.medId)
@@ -375,7 +411,7 @@ class MedicationAlarmService : Service() {
                     }
                 } else if (action == ACTION_DISMISS_ALL) {
                     val alarmsToHandle = ActiveAlarmManager.activeAlarms.value.toList()
-                    ActiveAlarmManager.activeAlarms.value = emptyList() // clear immediately
+                    ActiveAlarmManager.clearAlarms() // clear immediately
 
                     alarmsToHandle.forEach { rem ->
                         val medication = dao.getMedicationById(rem.medId)

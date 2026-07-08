@@ -74,6 +74,49 @@ object ReminderScheduler {
                 minNextTime
             }
 
+        } else if (medication.scheduleType == "CUSTOM") {
+            val startCal = Calendar.getInstance().apply {
+                timeInMillis = medication.startDate
+                set(Calendar.HOUR_OF_DAY, hour)
+                set(Calendar.MINUTE, minute)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+
+            if (startCal.timeInMillis > startAfterMillis) {
+                return startCal.timeInMillis
+            }
+
+            val repeatNum = if (medication.intervalHours <= 0) 1 else medication.intervalHours
+            val repeatUnit = medication.daysOfWeekCommaSeparated
+
+            val field = when (repeatUnit) {
+                "hours" -> Calendar.HOUR_OF_DAY
+                "days" -> Calendar.DAY_OF_YEAR
+                "weeks" -> Calendar.WEEK_OF_YEAR
+                "months" -> Calendar.MONTH
+                "years" -> Calendar.YEAR
+                else -> Calendar.DAY_OF_YEAR
+            }
+
+            if (field == Calendar.HOUR_OF_DAY) {
+                val hourMillis = repeatNum * 60 * 60 * 1000L
+                val elapsed = startAfterMillis - startCal.timeInMillis
+                val count = (elapsed / hourMillis) + 1
+                return startCal.timeInMillis + (count * hourMillis)
+            } else if (field == Calendar.DAY_OF_YEAR) {
+                val dayMillis = repeatNum * 24 * 60 * 60 * 1000L
+                val elapsed = startAfterMillis - startCal.timeInMillis
+                val count = (elapsed / dayMillis) + 1
+                return startCal.timeInMillis + (count * dayMillis)
+            } else {
+                var safetyCount = 0
+                while (startCal.timeInMillis <= startAfterMillis && safetyCount < 1000) {
+                    startCal.add(field, repeatNum)
+                    safetyCount++
+                }
+                return startCal.timeInMillis
+            }
         } else {
             // INTERVAL BASED
             val startCal = Calendar.getInstance().apply {

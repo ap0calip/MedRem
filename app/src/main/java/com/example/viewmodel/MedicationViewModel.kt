@@ -35,6 +35,118 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
         repository = MedicationRepository(dao)
     }
 
+    // --- Dynamic Labels ---
+    private val prefs = application.getSharedPreferences("MedRemPrefs", android.content.Context.MODE_PRIVATE)
+
+    val labelMode = MutableStateFlow(prefs.getString("label_mode", "ITEM") ?: "ITEM")
+    
+    val customProfileSing = MutableStateFlow(prefs.getString("custom_profile_sing", "Profile") ?: "Profile")
+    val customProfilePlur = MutableStateFlow(prefs.getString("custom_profile_plur", "Profiles") ?: "Profiles")
+    
+    val customMedicationSing = MutableStateFlow(prefs.getString("custom_med_sing", "Medication") ?: "Medication")
+    val customMedicationPlur = MutableStateFlow(prefs.getString("custom_med_plur", "Medications") ?: "Medications")
+    
+    val customDosageSing = MutableStateFlow(prefs.getString("custom_dosage_sing", "Dosage") ?: "Dosage")
+    val customDosagePlur = MutableStateFlow(prefs.getString("custom_dosage_plur", "Dosages") ?: "Dosages")
+
+    val customTakenLabel = MutableStateFlow(prefs.getString("custom_taken_label", "Taken") ?: "Taken")
+
+    fun setLabelMode(mode: String) {
+        labelMode.value = mode
+        prefs.edit().putString("label_mode", mode).apply()
+    }
+
+    fun setCustomLabels(
+        profileSing: String,
+        profilePlur: String,
+        medicationSing: String,
+        medicationPlur: String,
+        dosageSing: String,
+        dosagePlur: String,
+        takenLabel: String
+    ) {
+        customProfileSing.value = profileSing
+        customProfilePlur.value = profilePlur
+        customMedicationSing.value = medicationSing
+        customMedicationPlur.value = medicationPlur
+        customDosageSing.value = dosageSing
+        customDosagePlur.value = dosagePlur
+        customTakenLabel.value = takenLabel
+        
+        prefs.edit()
+            .putString("custom_profile_sing", profileSing)
+            .putString("custom_profile_plur", profilePlur)
+            .putString("custom_med_sing", medicationSing)
+            .putString("custom_med_plur", medicationPlur)
+            .putString("custom_dosage_sing", dosageSing)
+            .putString("custom_dosage_plur", dosagePlur)
+            .putString("custom_taken_label", takenLabel)
+            .apply()
+    }
+
+    val currentProfileSing: StateFlow<String> = combine(labelMode, customProfileSing) { mode, custom ->
+        when (mode) {
+            "MEDICATION" -> "Profile"
+            "ITEM" -> "Category"
+            "CUSTOM" -> custom
+            else -> "Profile"
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Category")
+
+    val currentProfilePlur: StateFlow<String> = combine(labelMode, customProfilePlur) { mode, custom ->
+        when (mode) {
+            "MEDICATION" -> "Profiles"
+            "ITEM" -> "Categories"
+            "CUSTOM" -> custom
+            else -> "Profiles"
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Categories")
+
+    val currentMedicationSing: StateFlow<String> = combine(labelMode, customMedicationSing) { mode, custom ->
+        when (mode) {
+            "MEDICATION" -> "Medication"
+            "ITEM" -> "Item"
+            "CUSTOM" -> custom
+            else -> "Medication"
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Item")
+
+    val currentMedicationPlur: StateFlow<String> = combine(labelMode, customMedicationPlur) { mode, custom ->
+        when (mode) {
+            "MEDICATION" -> "Medications"
+            "ITEM" -> "Items"
+            "CUSTOM" -> custom
+            else -> "Medications"
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Items")
+
+    val currentDosageSing: StateFlow<String> = combine(labelMode, customDosageSing) { mode, custom ->
+        when (mode) {
+            "MEDICATION" -> "Dosage"
+            "ITEM" -> "Description"
+            "CUSTOM" -> custom
+            else -> "Dosage"
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Description")
+
+    val currentDosagePlur: StateFlow<String> = combine(labelMode, customDosagePlur) { mode, custom ->
+        when (mode) {
+            "MEDICATION" -> "Dosages"
+            "ITEM" -> "Descriptions"
+            "CUSTOM" -> custom
+            else -> "Dosages"
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Descriptions")
+
+    val currentTakenLabel: StateFlow<String> = combine(labelMode, customTakenLabel) { mode, custom ->
+        when (mode) {
+            "MEDICATION" -> "Taken"
+            "ITEM" -> "Completed"
+            "CUSTOM" -> custom
+            else -> "Taken"
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Completed")
+
     // --- State Sources ---
     val familyMembers: StateFlow<List<FamilyMember>> = repository.familyMembersFlow
         .stateIn(
@@ -126,7 +238,8 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
         startDate: Long,
         familyMemberId: Long,
         isActive: Boolean = true,
-        snoozedUntil: Long = 0L
+        snoozedUntil: Long = 0L,
+        autoReset: Boolean = false
     ) {
         viewModelScope.launch {
             var lastLogged = 0L
@@ -149,7 +262,8 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                 familyMemberId = familyMemberId,
                 isActive = isActive,
                 snoozedUntil = snoozedUntil,
-                lastLoggedTime = lastLogged
+                lastLoggedTime = lastLogged,
+                autoReset = autoReset
             )
 
             val newId = repository.insertMedication(med)
@@ -164,10 +278,13 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun deleteMedication(medication: Medication) {
+    fun deleteMedication(medication: Medication, deleteHistory: Boolean = false) {
         viewModelScope.launch {
             ReminderScheduler.cancelAlarm(getApplication(), medication)
             repository.deleteMedication(medication)
+            if (deleteHistory) {
+                repository.deleteDoseRecordsByMedicationId(medication.id)
+            }
         }
     }
 
@@ -191,11 +308,30 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
             repository.insertDoseRecord(record)
 
             // Auto reschedule to next interval or day
-            val updatedMed = if (medication.isActive) {
+            var updatedMed = if (medication.isActive) {
                 medication.copy(snoozedUntil = 0L, lastLoggedTime = now)
             } else {
                 medication.copy(lastLoggedTime = now)
             }
+
+            if (medication.autoReset) {
+                val calendar = java.util.Calendar.getInstance()
+                calendar.timeInMillis = now
+                val hour = calendar.get(java.util.Calendar.HOUR_OF_DAY)
+                val minute = calendar.get(java.util.Calendar.MINUTE)
+                val formattedTime = String.format("%02d:%02d", hour, minute)
+                
+                calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                calendar.set(java.util.Calendar.MINUTE, 0)
+                calendar.set(java.util.Calendar.SECOND, 0)
+                calendar.set(java.util.Calendar.MILLISECOND, 0)
+                
+                updatedMed = updatedMed.copy(
+                    startDate = calendar.timeInMillis,
+                    startTime = formattedTime
+                )
+            }
+            
             repository.insertMedication(updatedMed)
             if (updatedMed.isActive) {
                 ReminderScheduler.scheduleAlarm(getApplication(), updatedMed)

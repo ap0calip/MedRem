@@ -34,7 +34,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -45,6 +48,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.SpanStyle
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.entity.DoseRecord
@@ -79,11 +89,24 @@ fun MedRemApp(
     viewModel: MedicationViewModel = viewModel()
 ) {
     val context = LocalContext.current
+    var tutorialStepIndex by remember { mutableStateOf(-1) }
     
     // State lists from Room Database (Flow-connected)
     val familyMembers by viewModel.familyMembers.collectAsState()
     val filteredMedications by viewModel.filteredMedications.collectAsState()
     val doseRecords by viewModel.doseRecords.collectAsState()
+    
+    // Dynamic labels
+    val activeLabelMode by viewModel.labelMode.collectAsState()
+    val profileSing by viewModel.currentProfileSing.collectAsState()
+    val profilePlur by viewModel.currentProfilePlur.collectAsState()
+    val medicationSing by viewModel.currentMedicationSing.collectAsState()
+    val medicationPlur by viewModel.currentMedicationPlur.collectAsState()
+    val dosageSing by viewModel.currentDosageSing.collectAsState()
+    val dosagePlur by viewModel.currentDosagePlur.collectAsState()
+    val takenLabel by viewModel.currentTakenLabel.collectAsState()
+    
+    var showCustomLabelsDialog by remember { mutableStateOf(false) }
     
     // Filter variables
     val selectedProfileId by viewModel.selectedFamilyMemberId.collectAsState()
@@ -137,59 +160,115 @@ fun MedRemApp(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Styled clinic cross icon
-                    Box(
+                var showMenu by remember { mutableStateOf(false) }
+                
+                // Menu icon on the left
+                Box {
+                    IconButton(
+                        onClick = { showMenu = true },
                         modifier = Modifier
-                            .size(36.dp)
-                            .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp)),
-                        contentAlignment = Alignment.Center
+                            .testTag("nav_menu_button")
+                            .tutorialHighlight(1, tutorialStepIndex, CircleShape)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.MedicalServices,
-                            contentDescription = "Clinic Logo",
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = "Navigation Menu",
+                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
-                    Spacer(modifier = Modifier.width(10.dp))
+
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Add $profileSing") },
+                            leadingIcon = { Icon(Icons.Default.PersonAdd, contentDescription = null) },
+                            onClick = {
+                                showAddProfileDialog = true
+                                showMenu = false
+                            }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Labels", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) },
+                            onClick = { /* Just a header */ },
+                            enabled = false
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Medication (Profile, Med, Dosage)") },
+                            leadingIcon = { Icon(Icons.Default.MedicalServices, contentDescription = null) },
+                            modifier = Modifier.padding(start = 16.dp),
+                            onClick = {
+                                viewModel.setLabelMode("MEDICATION")
+                                showMenu = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Item (Category, Item, Description)") },
+                            leadingIcon = { Icon(Icons.Default.Category, contentDescription = null) },
+                            modifier = Modifier.padding(start = 16.dp),
+                            onClick = {
+                                viewModel.setLabelMode("ITEM")
+                                showMenu = false
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Custom Labels") },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                            modifier = Modifier.padding(start = 16.dp),
+                            onClick = {
+                                showCustomLabelsDialog = true
+                                showMenu = false
+                            }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Backup & Restore") },
+                            leadingIcon = { Icon(Icons.Default.ImportExport, contentDescription = null) },
+                            onClick = {
+                                showDataTransferDialog = true
+                                showMenu = false
+                            }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Tutorial") },
+                            leadingIcon = { Icon(Icons.Default.Help, contentDescription = null) },
+                            onClick = {
+                                tutorialStepIndex = 0
+                                showMenu = false
+                            }
+                        )
+                    }
+                }
+
+                // Title centered
+                Row(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = if (activeLabelMode == "MEDICATION") Icons.Default.MedicalServices else Icons.Default.Category,
+                        contentDescription = "Active Label Mode",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp).padding(end = 8.dp)
+                    )
                     Text(
                         text = "MedRem",
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
+                        textAlign = TextAlign.Center,
                         modifier = Modifier.testTag("app_title")
                     )
                 }
                 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Button to create a custom Family Profile
-                    TextButton(
-                        onClick = { showAddProfileDialog = true },
-                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary),
-                        modifier = Modifier.testTag("add_profile_button")
-                    ) {
-                        Icon(imageVector = Icons.Default.PersonAdd, contentDescription = "Add Profile")
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Add Profile", fontSize = 14.sp)
-                    }
-
-                    Spacer(modifier = Modifier.width(2.dp))
-
-                    IconButton(
-                        onClick = { showDataTransferDialog = true },
-                        modifier = Modifier.testTag("data_transfer_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ImportExport,
-                            contentDescription = "Import/Export Schedules",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
+                // Empty box to balance the menu icon on the left
+                Box(modifier = Modifier.size(48.dp))
             }
 
             // --- ACTIVE ALARMS RUNNING BANNER ---
@@ -197,7 +276,7 @@ fun MedRemApp(
 
             // --- PROFILES FILTER TAG REGION (Unified View) ---
             Text(
-                text = "Profiles Filter",
+                text = "$profilePlur Filter",
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f),
@@ -206,7 +285,8 @@ fun MedRemApp(
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 4.dp),
+                    .padding(vertical = 4.dp)
+                    .tutorialHighlight(2, tutorialStepIndex, RoundedCornerShape(12.dp)),
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
@@ -216,9 +296,9 @@ fun MedRemApp(
                     FilterChip(
                         selected = isSelected,
                         onClick = { viewModel.selectFamilyMember(0L) },
-                        label = { Text("All Profiles") },
+                        label = { Text("All $profilePlur") },
                         leadingIcon = if (isSelected) {
-                            { Icon(Icons.Default.Check, "Selected", modifier = Modifier.size(16.dp)) }
+                            { Icon(Icons.Default.Check, stringResource(R.string.selected_desc), modifier = Modifier.size(16.dp)) }
                         } else null,
                         modifier = Modifier.testTag("profile_pill_all")
                     )
@@ -236,12 +316,12 @@ fun MedRemApp(
                         onClick = { viewModel.selectFamilyMember(member.id) },
                         label = {
                             Text(
-                                text = member.name + (if (member.isMe) " (Me)" else ""),
+                                text = member.name + (if (member.isMe) stringResource(R.string.profile_me_suffix) else ""),
                                 color = if (isSelected) MaterialTheme.colorScheme.onPrimary else color
                             )
                         },
                         leadingIcon = if (isSelected) {
-                            { Icon(Icons.Default.Check, "Selected", modifier = Modifier.size(16.dp)) }
+                            { Icon(Icons.Default.Check, stringResource(R.string.selected_desc), modifier = Modifier.size(16.dp)) }
                         } else {
                             {
                                 Box(
@@ -261,19 +341,20 @@ fun MedRemApp(
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { viewModel.setSearchQuery(it) },
-                placeholder = { Text("Search medicine name or notes...", fontSize = 14.sp) },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Search icon") },
+                placeholder = { Text("Search ${medicationSing.lowercase()} or ${dosageSing.lowercase()}...", fontSize = 14.sp) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search_icon_desc)) },
                 trailingIcon = if (searchQuery.isNotEmpty()) {
                     {
                         IconButton(onClick = { viewModel.setSearchQuery("") }) {
-                            Icon(Icons.Default.Clear, contentDescription = "Clear")
+                            Icon(Icons.Default.Clear, contentDescription = stringResource(R.string.clear_desc))
                         }
                     }
                 } else null,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 6.dp)
-                    .testTag("medicine_search"),
+                    .testTag("medicine_search")
+                    .tutorialHighlight(3, tutorialStepIndex, RoundedCornerShape(12.dp)),
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = MaterialTheme.colorScheme.primary,
@@ -285,21 +366,23 @@ fun MedRemApp(
             // --- NAVIGATION TABS ---
             TabRow(
                 selectedTabIndex = activeTab,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .tutorialHighlight(4, tutorialStepIndex, RoundedCornerShape(8.dp)),
                 containerColor = Color.Transparent,
                 divider = { HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)) }
             ) {
                 Tab(
                     selected = activeTab == 0,
                     onClick = { activeTab = 0 },
-                    text = { Text("Schedules", fontWeight = FontWeight.Bold, fontSize = 14.sp) },
-                    icon = { Icon(Icons.Default.Vaccines, contentDescription = "Schedules List") }
+                    text = { Text("$medicationPlur Schedules", fontWeight = FontWeight.Bold, fontSize = 14.sp) },
+                    icon = { Icon(Icons.Default.Vaccines, contentDescription = stringResource(R.string.schedules_list_desc)) }
                 )
                 Tab(
                     selected = activeTab == 1,
                     onClick = { activeTab = 1 },
-                    text = { Text("Taken History", fontWeight = FontWeight.Bold, fontSize = 14.sp) },
-                    icon = { Icon(Icons.Default.History, contentDescription = "Logs History") }
+                    text = { Text(stringResource(R.string.tab_history), fontWeight = FontWeight.Bold, fontSize = 14.sp) },
+                    icon = { Icon(Icons.Default.History, contentDescription = stringResource(R.string.logs_history_desc)) }
                 )
             }
 
@@ -312,11 +395,29 @@ fun MedRemApp(
                 if (activeTab == 0) {
                     // Schedules list
                     if (filteredMedications.isEmpty()) {
-                        EmptyStateView(
-                            icon = Icons.Default.HealthAndSafety,
-                            title = "No active reminders",
-                            description = if (searchQuery.isNotEmpty()) "No results match your search." else "Tap the '+' floating button to set up your first weekly or interval medication reminder."
-                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState()),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                EmptyStateView(
+                                    icon = Icons.Default.HealthAndSafety,
+                                    title = "No active reminders",
+                                    description = if (searchQuery.isNotEmpty()) "No results match your search." else "Tap the '+' floating button to set up your first weekly or interval ${medicationSing.lowercase()} reminder."
+                                )
+                            }
+                            DeveloperInfoCard(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 16.dp, end = 16.dp, bottom = 88.dp, top = 16.dp)
+                            )
+                        }
                     } else {
                         val now = System.currentTimeMillis()
                         val snoozedMeds = filteredMedications.filter { it.isActive && it.snoozedUntil > now }
@@ -331,13 +432,13 @@ fun MedRemApp(
 
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 80.dp),
+                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 88.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             if (snoozedMeds.isNotEmpty()) {
                                 item {
                                     Text(
-                                        text = "Snoozed Medications",
+                                        text = "Snoozed $medicationPlur",
                                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.error,
                                         modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
@@ -348,6 +449,9 @@ fun MedRemApp(
                                     MedicationReminderCard(
                                         medication = medication,
                                         member = member,
+                                        dosageSing = dosageSing,
+                                        medicationSing = medicationSing,
+                                        takenLabel = takenLabel,
                                         onTakeDose = { viewModel.logMedicationDose(medication, "TAKEN") },
                                         onSkipDose = { viewModel.logMedicationDose(medication, "SKIPPED") },
                                         onToggleActive = { active ->
@@ -370,7 +474,7 @@ fun MedRemApp(
                                             medicationToEdit = medication
                                             showAddMedicationDialog = true
                                         },
-                                        onDelete = { viewModel.deleteMedication(medication) }
+                                        onDelete = { deleteHistory -> viewModel.deleteMedication(medication, deleteHistory) }
                                     )
                                 }
                             }
@@ -378,7 +482,7 @@ fun MedRemApp(
                             if (sortedNextMeds.isNotEmpty()) {
                                 item {
                                     Text(
-                                        text = "Next Medications",
+                                        text = "Next $medicationPlur",
                                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
@@ -389,6 +493,9 @@ fun MedRemApp(
                                     MedicationReminderCard(
                                         medication = medication,
                                         member = member,
+                                        dosageSing = dosageSing,
+                                        medicationSing = medicationSing,
+                                        takenLabel = takenLabel,
                                         onTakeDose = { viewModel.logMedicationDose(medication, "TAKEN") },
                                         onSkipDose = { viewModel.logMedicationDose(medication, "SKIPPED") },
                                         onToggleActive = { active ->
@@ -411,9 +518,18 @@ fun MedRemApp(
                                             medicationToEdit = medication
                                             showAddMedicationDialog = true
                                         },
-                                        onDelete = { viewModel.deleteMedication(medication) }
+                                        onDelete = { deleteHistory -> viewModel.deleteMedication(medication, deleteHistory) }
                                     )
                                 }
+                            }
+
+                            // Moving DeveloperInfoCard here below Next Medication card
+                            item {
+                                DeveloperInfoCard(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 16.dp, bottom = 16.dp)
+                                )
                             }
                         }
                     }
@@ -437,21 +553,49 @@ fun MedRemApp(
                     }
 
                     if (filteredRecords.isEmpty()) {
-                        EmptyStateView(
-                            icon = Icons.Default.Timeline,
-                            title = "No history recorded",
-                            description = "No intakes logged or skipped yet for the selected profile."
-                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .verticalScroll(rememberScrollState()),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Box(
+                                modifier = Modifier.weight(1f),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                EmptyStateView(
+                                    icon = Icons.Default.Timeline,
+                                    title = "No history recorded",
+                                    description = "No ${takenLabel.lowercase()} or skipped yet for the selected ${profileSing.lowercase()}."
+                                )
+                            }
+                            DeveloperInfoCard(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 16.dp, end = 16.dp, bottom = 88.dp, top = 16.dp)
+                            )
+                        }
                     } else {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 80.dp),
+                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 88.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             items(filteredRecords, key = { it.id }) { record ->
                                 DoseHistoryCard(
                                     record = record,
+                                    takenLabel = takenLabel,
                                     onDeleteHistory = { viewModel.deleteDoseRecord(record.id) }
+                                )
+                            }
+
+                            // Moving DeveloperInfoCard here below Dose History logs
+                            item {
+                                DeveloperInfoCard(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 16.dp, bottom = 16.dp)
                                 )
                             }
                         }
@@ -469,14 +613,70 @@ fun MedRemApp(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(24.dp)
-                .testTag("add_medication_fab"),
+                .testTag("add_medication_fab")
+                .tutorialHighlight(5, tutorialStepIndex, RoundedCornerShape(16.dp)),
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = Color.White
         ) {
             Icon(
                 imageVector = Icons.Default.Add,
-                contentDescription = "Add medicine schedule",
+                contentDescription = "Add schedule",
                 modifier = Modifier.size(32.dp)
+            )
+        }
+
+        val tutorialSteps = remember(profileSing, profilePlur, medicationSing, medicationPlur, dosageSing, dosagePlur) {
+            listOf(
+                TutorialStep(
+                    title = "Welcome to the MedRem!",
+                    content = "This interactive guide will walk you through the key features of the application to help you keep track of your ${profilePlur.lowercase()}, ${medicationPlur.lowercase()}, and ${dosagePlur.lowercase()} effectively. Tap 'Next' to begin."
+                ),
+                TutorialStep(
+                    title = "Top-Left Navigation Menu",
+                    content = "Tap this menu icon to manage ${profilePlur.lowercase()}, change label presets, or back up your schedules."
+                ),
+                TutorialStep(
+                    title = "Category Filters",
+                    content = "Filter by ${profileSing.lowercase()} to quickly find your schedules and logs."
+                ),
+                TutorialStep(
+                    title = "Smart Item Search",
+                    content = "Quickly find any ${medicationSing.lowercase()} schedule, or ${dosageSing.lowercase()} by typing its name or details here."
+                ),
+                TutorialStep(
+                    title = "Schedules vs. History",
+                    content = "Easily toggle between schedules and history to view logged entries."
+                ),
+                TutorialStep(
+                    title = "Create a New Schedule",
+                    content = "Tap this '+' floating button to set up a new schedule, define its ${dosageSing.lowercase()}, and configure active timers."
+                ),
+                TutorialStep(
+                    title = "You're Ready to Go!",
+                    content = "You're all set! Enjoy organizing your reminder schedules."
+                )
+            )
+        }
+
+        if (tutorialStepIndex >= 0 && tutorialStepIndex < tutorialSteps.size) {
+            TutorialGuideBanner(
+                currentStep = tutorialStepIndex,
+                steps = tutorialSteps,
+                onNext = {
+                    if (tutorialStepIndex < tutorialSteps.size - 1) {
+                        tutorialStepIndex++
+                    } else {
+                        tutorialStepIndex = -1
+                    }
+                },
+                onBack = {
+                    if (tutorialStepIndex > 0) {
+                        tutorialStepIndex--
+                    }
+                },
+                onDismiss = {
+                    tutorialStepIndex = -1
+                }
             )
         }
     }
@@ -487,6 +687,8 @@ fun MedRemApp(
     if (showAddProfileDialog) {
         AddFamilyProfileDialog(
             profiles = familyMembers,
+            profileSing = profileSing,
+            profilePlur = profilePlur,
             onDismiss = { showAddProfileDialog = false },
             onSave = { id, name, colorHex, isMe ->
                 viewModel.addOrUpdateFamilyMember(id ?: 0L, name, colorHex, isMe)
@@ -505,8 +707,15 @@ fun MedRemApp(
             medication = editingMed,
             profiles = familyMembers,
             initialSelectedProfileId = selectedProfileId,
+            profileSing = profileSing,
+            profilePlur = profilePlur,
+            medicationSing = medicationSing,
+            medicationPlur = medicationPlur,
+            dosageSing = dosageSing,
+            dosagePlur = dosagePlur,
+            takenLabel = takenLabel,
             onDismiss = { showAddMedicationDialog = false },
-            onSave = { name, dosage, notes, schedType, days, hours, time, profileId, active ->
+            onSave = { name, dosage, notes, schedType, days, hours, time, startDate, profileId, active, autoReset ->
                 viewModel.addOrUpdateMedication(
                     id = editingMed?.id ?: 0,
                     name = name,
@@ -516,13 +725,189 @@ fun MedRemApp(
                     daysOfWeekCommaSeparated = days,
                     intervalHours = hours,
                     startTime = time,
-                    startDate = editingMed?.startDate ?: System.currentTimeMillis(),
+                    startDate = startDate,
                     familyMemberId = profileId,
-                    isActive = active
+                    isActive = active,
+                    autoReset = autoReset
                 )
                 showAddMedicationDialog = false
             }
         )
+    }
+
+    if (showCustomLabelsDialog) {
+        var profSing by remember { mutableStateOf(profileSing) }
+        var profPlur by remember { mutableStateOf(profilePlur) }
+        var medSing by remember { mutableStateOf(medicationSing) }
+        var medPlur by remember { mutableStateOf(medicationPlur) }
+        var doseSing by remember { mutableStateOf(dosageSing) }
+        var dosePlur by remember { mutableStateOf(dosagePlur) }
+        var takeLabelVal by remember { mutableStateOf(takenLabel) }
+
+        Dialog(onDismissRequest = { showCustomLabelsDialog = false }) {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+                    .testTag("custom_labels_dialog"),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(20.dp)
+                        .verticalScroll(rememberScrollState()),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "Customize Labels",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Provide your own custom singular and plural terms for Items, Categories, Descriptions, and Completed actions.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "Categories Group",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = profSing,
+                            onValueChange = { profSing = it },
+                            label = { Text("Singular") },
+                            placeholder = { Text("e.g. Category") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = profPlur,
+                            onValueChange = { profPlur = it },
+                            label = { Text("Plural") },
+                            placeholder = { Text("e.g. Categories") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Items Group",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = medSing,
+                            onValueChange = { medSing = it },
+                            label = { Text("Singular") },
+                            placeholder = { Text("e.g. Item") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = medPlur,
+                            onValueChange = { medPlur = it },
+                            label = { Text("Plural") },
+                            placeholder = { Text("e.g. Items") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Descriptions Group",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = doseSing,
+                            onValueChange = { doseSing = it },
+                            label = { Text("Singular") },
+                            placeholder = { Text("e.g. Description") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = dosePlur,
+                            onValueChange = { dosePlur = it },
+                            label = { Text("Plural") },
+                            placeholder = { Text("e.g. Descriptions") },
+                            modifier = Modifier.weight(1f),
+                            singleLine = true
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Action Group",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = takeLabelVal,
+                        onValueChange = { takeLabelVal = it },
+                        label = { Text("Action Label") },
+                        placeholder = { Text("e.g. Completed") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        TextButton(onClick = { showCustomLabelsDialog = false }) {
+                            Text("Cancel")
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                if (profSing.isNotBlank() && profPlur.isNotBlank() &&
+                                    medSing.isNotBlank() && medPlur.isNotBlank() &&
+                                    doseSing.isNotBlank() && dosePlur.isNotBlank() &&
+                                    takeLabelVal.isNotBlank()
+                                ) {
+                                    viewModel.setCustomLabels(
+                                        profSing.trim(), profPlur.trim(),
+                                        medSing.trim(), medPlur.trim(),
+                                        doseSing.trim(), dosePlur.trim(),
+                                        takeLabelVal.trim()
+                                    )
+                                    viewModel.setLabelMode("CUSTOM")
+                                    showCustomLabelsDialog = false
+                                } else {
+                                    Toast.makeText(context, "All fields are required for Custom Labels!", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        ) {
+                            Text("Apply")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     if (showDataTransferDialog) {
@@ -596,15 +981,23 @@ fun formatNextTriggerTime(triggerTime: Long): String {
     }
 }
 
+fun formatDateMmDdYyyy(millis: Long): String {
+    val sdf = SimpleDateFormat("MM/dd/yyyy", Locale.getDefault())
+    return sdf.format(Date(millis))
+}
+
 @Composable
 fun MedicationReminderCard(
     medication: Medication,
     member: FamilyMember?,
+    dosageSing: String,
+    medicationSing: String,
+    takenLabel: String,
     onTakeDose: () -> Unit,
     onSkipDose: () -> Unit,
     onToggleActive: (Boolean) -> Unit,
     onEdit: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: (Boolean) -> Unit
 ) {
     val context = LocalContext.current
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -694,7 +1087,7 @@ fun MedicationReminderCard(
             ) {
                 // Dosage details
                 Text(
-                    text = "Dosage: " + medication.dosage,
+                    text = "$dosageSing: " + medication.dosage,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
@@ -765,7 +1158,7 @@ fun MedicationReminderCard(
                 ) {
                     Icon(
                         imageVector = if (isCurrentlySnoozed) Icons.Default.Alarm else Icons.Default.Schedule,
-                        contentDescription = "Next Dose Icon",
+                        contentDescription = "Next Icon",
                         tint = if (isCurrentlySnoozed) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(16.dp)
                     )
@@ -774,7 +1167,7 @@ fun MedicationReminderCard(
                         text = if (isCurrentlySnoozed) {
                             "Snoozed until: " + formatNextTriggerTime(medication.snoozedUntil)
                         } else {
-                            "Next dose: " + formatNextTriggerTime(com.example.reminder.ReminderScheduler.getNextTriggerTime(medication, now))
+                            "Next: " + formatNextTriggerTime(com.example.reminder.ReminderScheduler.getNextTriggerTime(medication, now))
                         },
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
@@ -793,7 +1186,7 @@ fun MedicationReminderCard(
                     Button(
                         onClick = {
                             onTakeDose()
-                            Toast.makeText(context, "${medication.name} logged as TAKEN!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "${medication.name} logged as ${takenLabel.uppercase()}!", Toast.LENGTH_SHORT).show()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         modifier = Modifier
@@ -804,7 +1197,7 @@ fun MedicationReminderCard(
                     ) {
                         Icon(imageVector = Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Log Taken", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text("$takenLabel", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                     }
 
                     OutlinedButton(
@@ -822,7 +1215,7 @@ fun MedicationReminderCard(
                     ) {
                         Icon(imageVector = Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Log Skipped", fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        Text("Skipped", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     }
                 }
             }
@@ -830,14 +1223,39 @@ fun MedicationReminderCard(
     }
 
     if (showDeleteConfirm) {
+        var deleteHistory by remember { mutableStateOf(true) }
+
         AlertDialog(
             onDismissRequest = { showDeleteConfirm = false },
-            title = { Text("Delete Reminder?") },
-            text = { Text("Are you sure you want to stop tracking and delete the reminder schedule for ${medication.name}?") },
+            title = { Text("Delete $medicationSing Reminder?") },
+            text = {
+                Column {
+                    Text("Are you sure you want to stop tracking and delete the reminder schedule for ${medication.name}?")
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { deleteHistory = !deleteHistory }
+                            .padding(vertical = 4.dp)
+                    ) {
+                        Checkbox(
+                            checked = deleteHistory,
+                            onCheckedChange = { deleteHistory = it },
+                            modifier = Modifier.testTag("delete_history_checkbox")
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Also delete all history logs for this ${medicationSing.lowercase()}.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        onDelete()
+                        onDelete(deleteHistory)
                         showDeleteConfirm = false
                     }
                 ) {
@@ -856,6 +1274,7 @@ fun MedicationReminderCard(
 @Composable
 fun DoseHistoryCard(
     record: DoseRecord,
+    takenLabel: String,
     onDeleteHistory: () -> Unit
 ) {
     val dateString = remember(record.actualTime) {
@@ -933,8 +1352,9 @@ fun DoseHistoryCard(
                         )
                     }
                     Spacer(modifier = Modifier.height(2.dp))
+                    val displayStatus = if (record.status == "TAKEN") takenLabel else if (record.status == "SKIPPED") "Skipped" else record.status
                     Text(
-                        text = "Status: ${record.status} | $dateString",
+                        text = "Status: $displayStatus | $dateString",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
@@ -957,10 +1377,13 @@ fun DoseHistoryCard(
 @Composable
 fun AddFamilyProfileDialog(
     profiles: List<FamilyMember>,
+    profileSing: String,
+    profilePlur: String,
     onDismiss: () -> Unit,
     onSave: (id: Long?, name: String, colorHex: String, isMe: Boolean) -> Unit,
     onDelete: (FamilyMember) -> Unit
 ) {
+    val context = LocalContext.current
     var editingProfileId by remember { mutableStateOf<Long?>(null) }
     var editingProfileIsMe by remember { mutableStateOf(false) }
 
@@ -997,7 +1420,7 @@ fun AddFamilyProfileDialog(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = if (editingProfileId != null) "Edit Profile" else "Manage & Add Profiles",
+                    text = if (editingProfileId != null) "Edit $profileSing" else "Manage & Add $profilePlur",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
@@ -1014,7 +1437,7 @@ fun AddFamilyProfileDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Editing Mode",
+                            text = stringResource(R.string.editing_mode),
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.secondary
                         )
@@ -1026,7 +1449,7 @@ fun AddFamilyProfileDialog(
                                 selectedColorIndex = 0
                             }
                         ) {
-                            Text("Switch to Create Profile")
+                            Text("Switch to Create $profileSing")
                         }
                     }
                     Spacer(modifier = Modifier.height(8.dp))
@@ -1038,7 +1461,7 @@ fun AddFamilyProfileDialog(
                         name = it
                         if (it.trim().isNotEmpty()) inlineErrorMsg = null
                     },
-                    label = { Text("Profile Name (e.g. Grandma, Dad)") },
+                    label = { Text("$profileSing Name") },
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("profile_name_input"),
@@ -1061,7 +1484,7 @@ fun AddFamilyProfileDialog(
                 Spacer(modifier = Modifier.height(16.dp))
                 
                 Text(
-                    text = "Choose Tag Color",
+                    text = stringResource(R.string.choose_tag_color),
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
@@ -1098,20 +1521,20 @@ fun AddFamilyProfileDialog(
                     horizontalArrangement = Arrangement.End
                 ) {
                     TextButton(onClick = onDismiss) {
-                        Text("Cancel")
+                        Text(stringResource(R.string.btn_cancel))
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
                             if (name.trim().isEmpty()) {
-                                inlineErrorMsg = "Name cannot be empty!"
+                                inlineErrorMsg = context.getString(R.string.error_empty_name)
                             } else {
                                 onSave(editingProfileId, name, colors[selectedColorIndex], editingProfileIsMe)
                             }
                         },
                         modifier = Modifier.testTag("save_profile_button")
                     ) {
-                        Text(if (editingProfileId != null) "Update Profile" else "Save Profile")
+                        Text(if (editingProfileId != null) "Update $profileSing" else "Save $profileSing")
                     }
                 }
 
@@ -1125,7 +1548,7 @@ fun AddFamilyProfileDialog(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = "Existing Profiles",
+                    text = "Existing $profilePlur",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -1153,7 +1576,7 @@ fun AddFamilyProfileDialog(
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
-                            text = profile.name + (if (profile.isMe) " (Me)" else ""),
+                            text = profile.name + (if (profile.isMe) stringResource(R.string.profile_me_suffix) else ""),
                             fontSize = 14.sp,
                             modifier = Modifier.weight(1f)
                         )
@@ -1174,7 +1597,7 @@ fun AddFamilyProfileDialog(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Edit,
-                                contentDescription = "Edit Profile",
+                                contentDescription = "Edit",
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(20.dp)
                             )
@@ -1189,14 +1612,14 @@ fun AddFamilyProfileDialog(
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Delete,
-                                    contentDescription = "Delete Profile",
+                                    contentDescription = "Delete",
                                     tint = MaterialTheme.colorScheme.error,
                                     modifier = Modifier.size(20.dp)
                                 )
                             }
                         } else {
                             Text(
-                                text = "Required",
+                                text = stringResource(R.string.required),
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                             )
@@ -1211,8 +1634,8 @@ fun AddFamilyProfileDialog(
         val member = profileToDelete
         AlertDialog(
             onDismissRequest = { profileToDelete = null },
-            title = { Text("Delete Family Profile?") },
-            text = { Text("Are you sure you want to delete the profile for \"${member?.name}\"? All their history will remain but the profile itself will be removed. Action cannot be undone.") },
+            title = { Text("Delete $profileSing?") },
+            text = { Text("Are you sure you want to delete the $profileSing for \"${member?.name ?: ""}\"? All history will remain but the $profileSing itself will be removed. Action cannot be undone.") },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -1221,7 +1644,7 @@ fun AddFamilyProfileDialog(
                     },
                     modifier = Modifier.testTag("confirm_delete_profile_button")
                 ) {
-                    Text("Delete", color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
+                    Text(stringResource(R.string.btn_delete), color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -1229,7 +1652,7 @@ fun AddFamilyProfileDialog(
                     onClick = { profileToDelete = null },
                     modifier = Modifier.testTag("cancel_delete_profile_button")
                 ) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.btn_cancel))
                 }
             }
         )
@@ -1237,12 +1660,19 @@ fun AddFamilyProfileDialog(
 }
 
 // Dialog: Add or Edit Medication Reminders
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun AddEditMedicationScheduleDialog(
     medication: Medication?,
     profiles: List<FamilyMember>,
     initialSelectedProfileId: Long = 0L,
+    profileSing: String,
+    profilePlur: String,
+    medicationSing: String,
+    medicationPlur: String,
+    dosageSing: String,
+    dosagePlur: String,
+    takenLabel: String,
     onDismiss: () -> Unit,
     onSave: (
         name: String,
@@ -1252,15 +1682,18 @@ fun AddEditMedicationScheduleDialog(
         daysOfWeekCommaSeparated: String,
         intervalHours: Int,
         startTime: String,
+        startDate: Long,
         profileId: Long,
-        isActive: Boolean
+        isActive: Boolean,
+        autoReset: Boolean
     ) -> Unit
 ) {
     // Basic Form Fields
+    val context = LocalContext.current
     var name by remember { mutableStateOf(medication?.name ?: "") }
     var dosage by remember { mutableStateOf(medication?.dosage ?: "") }
     var notes by remember { mutableStateOf(medication?.instructions ?: "") }
-    var scheduleType by remember { mutableStateOf(medication?.scheduleType ?: "WEEKLY") } // "WEEKLY" or "INTERVAL"
+    var scheduleType by remember { mutableStateOf(medication?.scheduleType ?: "WEEKLY") } // "WEEKLY", "INTERVAL" or "CUSTOM"
     
     // Schedule Configuration: Weekly custom days
     val daysList = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
@@ -1274,6 +1707,12 @@ fun AddEditMedicationScheduleDialog(
     
     // Schedule Configuration: Interval hours
     var intervalHours by remember { mutableStateOf(medication?.intervalHours ?: 8) }
+
+    // Custom Configuration: Repeat value, unit, and start date
+    var customRepeatValue by remember { mutableStateOf("1") }
+    var customRepeatUnit by remember { mutableStateOf("days") }
+    var isAutoReset by remember { mutableStateOf(medication?.autoReset ?: false) }
+    var customStartDate by remember { mutableStateOf(System.currentTimeMillis()) }
     
     // Time & Starting Configuration (AM/PM option with split hours & minutes)
     var is12Hour by remember { mutableStateOf(true) }
@@ -1303,6 +1742,10 @@ fun AddEditMedicationScheduleDialog(
         notes = medication?.instructions ?: ""
         scheduleType = medication?.scheduleType ?: "WEEKLY"
         intervalHours = medication?.intervalHours ?: 8
+        
+        customRepeatValue = if (medication?.scheduleType == "CUSTOM") medication.intervalHours.toString() else "1"
+        customRepeatUnit = if (medication?.scheduleType == "CUSTOM") medication.daysOfWeekCommaSeparated else "days"
+        customStartDate = if (medication?.scheduleType == "CUSTOM") medication.startDate else System.currentTimeMillis()
         
         daysList.forEach { day ->
             checkedDays[day] = medication?.daysOfWeekCommaSeparated?.contains(day) ?: false
@@ -1358,7 +1801,7 @@ fun AddEditMedicationScheduleDialog(
             ) {
                 item {
                     Text(
-                        text = if (medication == null) "New Reminder Schedule" else "Edit Medication Schedule",
+                        text = if (medication == null) "New $medicationSing Schedule" else "Edit $medicationSing Schedule",
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
@@ -1368,7 +1811,7 @@ fun AddEditMedicationScheduleDialog(
                 // Field 4: Profile selector dropdown list (Moved to top)
                 item {
                     Text(
-                        text = "Assign to Profile",
+                        text = "Assign to $profileSing",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
@@ -1413,7 +1856,7 @@ fun AddEditMedicationScheduleDialog(
                             name = it
                             if (it.isNotBlank()) nameError = null
                         },
-                        label = { Text("Medication Name (e.g. Paracetamol)") },
+                        label = { Text("$medicationSing Name") },
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("medication_name_input"),
@@ -1431,7 +1874,7 @@ fun AddEditMedicationScheduleDialog(
                             dosage = it
                             if (it.isNotBlank()) dosageError = null
                         },
-                        label = { Text("Dosage (e.g. 1 Tablet, 10ml)") },
+                        label = { Text(dosageSing) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("medication_dosage_input"),
@@ -1444,14 +1887,17 @@ fun AddEditMedicationScheduleDialog(
                 // Field 5: Schedule Type
                 item {
                     Text(
-                        text = "Reminders Type Selection",
+                        text = stringResource(R.string.schedule_type_selection_title),
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     
-                    Row(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(0.dp)
+                    ) {
                         Button(
                             onClick = { scheduleType = "WEEKLY" },
                             modifier = Modifier
@@ -1461,9 +1907,18 @@ fun AddEditMedicationScheduleDialog(
                                 containerColor = if (scheduleType == "WEEKLY") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
                                 contentColor = if (scheduleType == "WEEKLY") Color.White else MaterialTheme.colorScheme.onSurface
                             ),
-                            shape = RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp)
+                            shape = RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
                         ) {
-                            Text("Weekly Days")
+                            val parts = stringResource(R.string.schedule_weekly_days).split(" ")
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(parts.getOrNull(0) ?: "Weekly", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (parts.size > 1) {
+                                    Text(parts.getOrNull(1) ?: "Days", fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                } else {
+                                    Spacer(modifier = Modifier.height(9.dp))
+                                }
+                            }
                         }
                         
                         Button(
@@ -1475,9 +1930,36 @@ fun AddEditMedicationScheduleDialog(
                                 containerColor = if (scheduleType == "INTERVAL") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
                                 contentColor = if (scheduleType == "INTERVAL") Color.White else MaterialTheme.colorScheme.onSurface
                             ),
-                            shape = RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp)
+                            shape = RoundedCornerShape(0.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
                         ) {
-                            Text("Interval Hours")
+                            val parts = stringResource(R.string.schedule_interval_hours).split(" ")
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(parts.getOrNull(0) ?: "Interval", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (parts.size > 1) {
+                                    Text(parts.getOrNull(1) ?: "Hours", fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                } else {
+                                    Spacer(modifier = Modifier.height(9.dp))
+                                }
+                            }
+                        }
+
+                        Button(
+                            onClick = { scheduleType = "CUSTOM" },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("type_custom"),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (scheduleType == "CUSTOM") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
+                                contentColor = if (scheduleType == "CUSTOM") Color.White else MaterialTheme.colorScheme.onSurface
+                            ),
+                            shape = RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("Custom", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("Repeat", fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            }
                         }
                     }
                 }
@@ -1487,7 +1969,7 @@ fun AddEditMedicationScheduleDialog(
                     Column(modifier = Modifier.fillMaxWidth()) {
                         if (scheduleType == "WEEKLY") {
                             Text(
-                                text = "Weekly Custom Days selection",
+                                text = stringResource(R.string.weekly_custom_days_title),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
@@ -1509,9 +1991,9 @@ fun AddEditMedicationScheduleDialog(
                                     )
                                 }
                             }
-                        } else {
+                        } else if (scheduleType == "INTERVAL") {
                             Text(
-                                text = "How often? (Interval in Hours)",
+                                text = stringResource(R.string.how_often_interval_title),
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
@@ -1534,6 +2016,162 @@ fun AddEditMedicationScheduleDialog(
                                     )
                                 }
                             }
+                        } else if (scheduleType == "CUSTOM") {
+                            // Part 1: Label "Repeat Every", textbox to input number, drop-down to select from: hours, days, weeks, months, years
+                            Text(
+                                text = "Repeat Every",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                OutlinedTextField(
+                                    value = customRepeatValue,
+                                    onValueChange = { newValue ->
+                                        val filtered = newValue.filter { it.isDigit() }
+                                        customRepeatValue = filtered
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("custom_repeat_value_input"),
+                                    singleLine = true,
+                                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                    placeholder = { Text("1") }
+                                )
+
+                                var expandedDropdown by remember { mutableStateOf(false) }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1.2f)
+                                        .testTag("custom_repeat_unit_box")
+                                ) {
+                                    OutlinedTextField(
+                                        value = customRepeatUnit.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() },
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        trailingIcon = {
+                                            IconButton(onClick = { expandedDropdown = !expandedDropdown }) {
+                                                Icon(
+                                                    imageVector = if (expandedDropdown) Icons.Default.ArrowDropUp else Icons.Default.ArrowDropDown,
+                                                    contentDescription = "Select unit"
+                                                )
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { expandedDropdown = !expandedDropdown },
+                                        singleLine = true
+                                    )
+
+                                    DropdownMenu(
+                                        expanded = expandedDropdown,
+                                        onDismissRequest = { expandedDropdown = false }
+                                    ) {
+                                        val units = listOf("hours", "days", "weeks", "months", "years")
+                                        units.forEach { unit ->
+                                            DropdownMenuItem(
+                                                text = { Text(unit.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }) },
+                                                onClick = {
+                                                    customRepeatUnit = unit
+                                                    expandedDropdown = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { isAutoReset = !isAutoReset }
+                            ) {
+                                Checkbox(
+                                    checked = isAutoReset,
+                                    onCheckedChange = { isAutoReset = it }
+                                )
+                                Text("Auto Reset")
+                            }
+                            if (isAutoReset) {
+                                Text(
+                                    text = "The Alarm reset to the time of $takenLabel and Skipped.",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(start = 12.dp, bottom = 8.dp)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Part 2: Calendar to select the first day mm/dd/yyyy.
+                            Text(
+                                text = "First Day",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            )
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            var showDatePicker by remember { mutableStateOf(false) }
+
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                OutlinedTextField(
+                                    value = formatDateMmDdYyyy(customStartDate),
+                                    onValueChange = {},
+                                    readOnly = true,
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Default.CalendarToday,
+                                            contentDescription = "Select calendar day"
+                                        )
+                                    },
+                                    modifier = Modifier.fillMaxWidth().testTag("custom_start_date_input"),
+                                    singleLine = true
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .background(Color.Transparent)
+                                        .clickable { showDatePicker = true }
+                                )
+                            }
+
+                            if (showDatePicker) {
+                                val datePickerState = rememberDatePickerState(
+                                    initialSelectedDateMillis = customStartDate
+                                )
+                                DatePickerDialog(
+                                    onDismissRequest = { showDatePicker = false },
+                                    confirmButton = {
+                                        TextButton(
+                                            onClick = {
+                                                datePickerState.selectedDateMillis?.let {
+                                                    customStartDate = it
+                                                }
+                                                showDatePicker = false
+                                            }
+                                        ) {
+                                            Text("OK")
+                                        }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showDatePicker = false }) {
+                                            Text("Cancel")
+                                        }
+                                    }
+                                ) {
+                                    DatePicker(state = datePickerState)
+                                }
+                            }
                         }
                     }
                 }
@@ -1542,7 +2180,7 @@ fun AddEditMedicationScheduleDialog(
                 item {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            text = "Alert Starting Time",
+                            text = stringResource(R.string.alert_starting_time_title),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
@@ -1571,7 +2209,7 @@ fun AddEditMedicationScheduleDialog(
                                 modifier = Modifier.weight(1f).height(38.dp),
                                 contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                             ) {
-                                Text("12-Hour (AM/PM)", fontSize = 12.sp)
+                                Text(stringResource(R.string.twelve_hour_format), fontSize = 12.sp)
                             }
 
                             Button(
@@ -1595,7 +2233,7 @@ fun AddEditMedicationScheduleDialog(
                                 modifier = Modifier.weight(1f).height(38.dp),
                                 contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                             ) {
-                                Text("24-Hour", fontSize = 12.sp)
+                                Text(stringResource(R.string.twenty_four_hour_format), fontSize = 12.sp)
                             }
                         }
 
@@ -1616,8 +2254,8 @@ fun AddEditMedicationScheduleDialog(
                                         timeError = null
                                     }
                                 },
-                                label = { Text("Hour") },
-                                placeholder = { Text("--") },
+                                label = { Text(stringResource(R.string.hour_label)) },
+                                placeholder = { Text(stringResource(R.string.placeholder_dash)) },
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("time_hour_input"),
@@ -1641,8 +2279,8 @@ fun AddEditMedicationScheduleDialog(
                                         timeError = null
                                     }
                                 },
-                                label = { Text("Minute") },
-                                placeholder = { Text("--") },
+                                label = { Text(stringResource(R.string.minute_label)) },
+                                placeholder = { Text(stringResource(R.string.placeholder_dash)) },
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("time_minute_input"),
@@ -1666,7 +2304,7 @@ fun AddEditMedicationScheduleDialog(
                                         modifier = Modifier.height(34.dp).width(50.dp),
                                         contentPadding = PaddingValues(0.dp)
                                     ) {
-                                        Text("AM", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Text(stringResource(R.string.am_text), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
 
                                     Button(
@@ -1678,7 +2316,7 @@ fun AddEditMedicationScheduleDialog(
                                         modifier = Modifier.height(34.dp).width(50.dp),
                                         contentPadding = PaddingValues(0.dp)
                                     ) {
-                                        Text("PM", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                        Text(stringResource(R.string.pm_text), fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -1703,18 +2341,18 @@ fun AddEditMedicationScheduleDialog(
                         horizontalArrangement = Arrangement.End
                     ) {
                         TextButton(onClick = onDismiss) {
-                            Text("Cancel")
+                            Text(stringResource(R.string.btn_cancel))
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Button(
                             onClick = {
                                 var hasError = false
                                 if (name.trim().isEmpty()) {
-                                    nameError = "Medication name is required!"
+                                    nameError = "$medicationSing name is required"
                                     hasError = true
                                 }
                                 if (dosage.trim().isEmpty()) {
-                                    dosageError = "Dosage amount is required!"
+                                    dosageError = "$dosageSing is required"
                                     hasError = true
                                 }
 
@@ -1722,31 +2360,42 @@ fun AddEditMedicationScheduleDialog(
                                 val minVal = selectedMinute.toIntOrNull()
                                 
                                 if (hrVal == null || minVal == null) {
-                                    timeError = "Hour and minute are required!"
+                                    timeError = context.getString(R.string.error_hour_minute_required)
                                     hasError = true
                                 } else {
                                     if (is12Hour) {
                                         if (hrVal < 1 || hrVal > 12) {
-                                            timeError = "Hour must be 1 to 12"
+                                            timeError = context.getString(R.string.error_hour_1_to_12)
                                             hasError = true
                                         }
                                     } else {
                                         if (hrVal < 0 || hrVal > 23) {
-                                            timeError = "Hour must be 0 to 23"
+                                            timeError = context.getString(R.string.error_hour_0_to_23)
                                             hasError = true
                                         }
                                     }
                                     if (minVal < 0 || minVal > 59) {
-                                        timeError = "Minute must be 0 to 59"
+                                        timeError = context.getString(R.string.error_minute_0_to_59)
                                         hasError = true
                                     }
                                 }
 
                                 if (!hasError && hrVal != null && minVal != null) {
-                                    val daysCommaStr = if (scheduleType == "WEEKLY") {
-                                        checkedDays.filter { it.value }.keys.joinToString(",")
+                                    val daysCommaStr = when (scheduleType) {
+                                        "WEEKLY" -> checkedDays.filter { it.value }.keys.joinToString(",")
+                                        "CUSTOM" -> customRepeatUnit
+                                        else -> ""
+                                    }
+
+                                    val finalIntervalHours = when (scheduleType) {
+                                        "CUSTOM" -> customRepeatValue.toIntOrNull() ?: 1
+                                        else -> intervalHours
+                                    }
+
+                                    val finalStartDate = if (scheduleType == "CUSTOM") {
+                                        customStartDate
                                     } else {
-                                        ""
+                                        medication?.startDate ?: System.currentTimeMillis()
                                     }
 
                                     val finalHr24 = if (is12Hour) {
@@ -1766,16 +2415,18 @@ fun AddEditMedicationScheduleDialog(
                                         notes.trim(),
                                         scheduleType,
                                         daysCommaStr,
-                                        intervalHours,
+                                        finalIntervalHours,
                                         formattedStartTime,
+                                        finalStartDate,
                                         selectedProfileId,
-                                        medication?.isActive ?: true
+                                        medication?.isActive ?: true,
+                                        isAutoReset
                                     )
                                 }
                             },
                             modifier = Modifier.testTag("save_medication_button")
                         ) {
-                            Text(if (medication == null) "Create Schedule" else "Save Changes")
+                            Text(if (medication == null) "Create $medicationSing Schedule" else "Save Changes")
                         }
                     }
                 }
@@ -1792,6 +2443,7 @@ fun ActiveAlarmsBanner(
     val context = LocalContext.current
     val activeAlarms by com.example.reminder.ActiveAlarmManager.activeAlarms.collectAsState()
     val familyMembers by viewModel.familyMembers.collectAsState()
+    val takenLabel by viewModel.currentTakenLabel.collectAsState()
 
     if (activeAlarms.isEmpty()) return
 
@@ -1906,9 +2558,9 @@ fun ActiveAlarmsBanner(
                                     shape = RoundedCornerShape(8.dp),
                                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                                 ) {
-                                    Icon(Icons.Default.Check, "Taken", tint = Color.White, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Check, takenLabel, tint = Color.White, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Taken", fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
+                                    Text(takenLabel, fontSize = 12.sp, color = Color.White, fontWeight = FontWeight.Bold)
                                 }
 
                                 // Snooze Button
@@ -2003,6 +2655,11 @@ fun DataTransferDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val profileSing by viewModel.currentProfileSing.collectAsState()
+    val profilePlur by viewModel.currentProfilePlur.collectAsState()
+    val medicationSing by viewModel.currentMedicationSing.collectAsState()
+    val medicationPlur by viewModel.currentMedicationPlur.collectAsState()
+
     var activeTab by remember { mutableStateOf(0) } // 0 = Export, 1 = Import
 
     // --- Export states ---
@@ -2034,7 +2691,7 @@ fun DataTransferDialog(
             importValidationErrorMsg = null
             hasParsedSuccessfully = true
         } catch (e: Exception) {
-            importValidationErrorMsg = "Invalid JSON data: ${e.localizedMessage}"
+            importValidationErrorMsg = context.getString(R.string.error_invalid_json, e.localizedMessage ?: "")
             importPreviewProfilesCount = 0
             importPreviewMedsCount = 0
             hasParsedSuccessfully = false
@@ -2062,13 +2719,13 @@ fun DataTransferDialog(
                 ) {
                     Icon(
                         imageVector = Icons.Default.ImportExport,
-                        contentDescription = "Data Transfer Icon",
+                        contentDescription = stringResource(R.string.data_transfer_icon_desc),
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(28.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Backup & Restore",
+                        text = stringResource(R.string.backup_restore_title),
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -2085,12 +2742,12 @@ fun DataTransferDialog(
                     Tab(
                         selected = activeTab == 0,
                         onClick = { activeTab = 0 },
-                        text = { Text("Export Schedules", fontWeight = FontWeight.Bold) }
+                        text = { Text(stringResource(R.string.export_schedules_tab), fontWeight = FontWeight.Bold) }
                     )
                     Tab(
                         selected = activeTab == 1,
                         onClick = { activeTab = 1 },
-                        text = { Text("Import Backup", fontWeight = FontWeight.Bold) }
+                        text = { Text(stringResource(R.string.import_backup_tab), fontWeight = FontWeight.Bold) }
                     )
                 }
 
@@ -2099,7 +2756,7 @@ fun DataTransferDialog(
                 if (activeTab == 0) {
                     // EXPORT TAB UI
                     Text(
-                        text = "Transfer medication schedules and profile details as a secure JSON package.",
+                        text = stringResource(R.string.export_description),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                         modifier = Modifier.padding(bottom = 16.dp)
@@ -2107,7 +2764,7 @@ fun DataTransferDialog(
 
                     // Target profile option
                     Text(
-                        text = "Target Profile Scope:",
+                        text = "Target $profileSing Scope:",
                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -2122,15 +2779,35 @@ fun DataTransferDialog(
                             FilterChip(
                                 selected = isSelected,
                                 onClick = { selectedExportProfileId = 0L },
-                                label = { Text("All Profiles") }
+                                label = { Text("All $profilePlur") },
+                                leadingIcon = if (isSelected) {
+                                    { Icon(Icons.Default.Check, stringResource(R.string.selected_desc), modifier = Modifier.size(16.dp)) }
+                                } else null
                             )
                         }
                         items(familyMembers, key = { "exp_${it.id}" }) { member ->
                             val isSelected = selectedExportProfileId == member.id
+                            val color = remember(member.colorHex) {
+                                try { Color(android.graphics.Color.parseColor(member.colorHex)) }
+                                catch (e: Exception) { Color.Gray }
+                            }
                             FilterChip(
                                 selected = isSelected,
                                 onClick = { selectedExportProfileId = member.id },
-                                label = { Text(member.name) }
+                                label = {
+                                    Text(
+                                        text = member.name,
+                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else color
+                                    )
+                                },
+                                leadingIcon = {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(color)
+                                    )
+                                }
                             )
                         }
                     }
@@ -2144,17 +2821,17 @@ fun DataTransferDialog(
                             // Copy to clipboard
                             val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
                             if (clipboardManager != null) {
-                                val clipData = android.content.ClipData.newPlainText("MedRem Alarms Export", jsonString)
+                                val clipData = android.content.ClipData.newPlainText(context.getString(R.string.app_name) + " Export", jsonString)
                                 clipboardManager.setPrimaryClip(clipData)
-                                Toast.makeText(context, "Schedules copied to clipboard!", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, context.getString(R.string.toast_copied_to_clipboard), Toast.LENGTH_SHORT).show()
                             }
                         },
                         modifier = Modifier.fillMaxWidth().height(48.dp).testTag("copy_export_json_button"),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Default.ContentCopy, "Copy icon")
+                        Icon(Icons.Default.ContentCopy, stringResource(R.string.copy_icon_desc))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Copy Export JSON to Clipboard", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.btn_copy_export_json), fontWeight = FontWeight.Bold)
                     }
 
                     Spacer(modifier = Modifier.height(10.dp))
@@ -2167,23 +2844,23 @@ fun DataTransferDialog(
                             // Launch Android share sheet
                             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                 type = "application/json"
-                                putExtra(Intent.EXTRA_SUBJECT, "MedRem Schedules Backup")
+                                putExtra(Intent.EXTRA_SUBJECT, context.getString(R.string.app_name) + " Schedules Backup")
                                 putExtra(Intent.EXTRA_TEXT, jsonString)
                             }
-                            context.startActivity(Intent.createChooser(shareIntent, "Share Backup JSON"))
+                            context.startActivity(Intent.createChooser(shareIntent, context.getString(R.string.btn_share_backup)))
                         },
                         modifier = Modifier.fillMaxWidth().height(48.dp).testTag("share_export_json_button"),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Default.Share, "Share icon")
+                        Icon(Icons.Default.Share, stringResource(R.string.share_icon_desc))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Share Backup Package", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.btn_share_backup), fontWeight = FontWeight.Bold)
                     }
 
                 } else {
                     // IMPORT TAB UI
                     Text(
-                        text = "Paste your backup JSON package below to restore profiles and schedule reminders.",
+                        text = stringResource(R.string.import_description),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                         modifier = Modifier.padding(bottom = 12.dp)
@@ -2196,24 +2873,24 @@ fun DataTransferDialog(
                             val itemText = clipboardManager?.primaryClip?.getItemAt(0)?.text?.toString()
                             if (!itemText.isNullOrBlank()) {
                                 importText = itemText
-                                Toast.makeText(context, "Clipboard content pasted!", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, context.getString(R.string.toast_clipboard_pasted), Toast.LENGTH_SHORT).show()
                             } else {
-                                Toast.makeText(context, "Clipboard is empty!", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, context.getString(R.string.toast_clipboard_empty), Toast.LENGTH_SHORT).show()
                             }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), contentColor = MaterialTheme.colorScheme.primary),
                         modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
                         shape = RoundedCornerShape(10.dp)
                     ) {
-                        Icon(Icons.Default.ContentPaste, "Paste icon")
+                        Icon(Icons.Default.ContentPaste, stringResource(R.string.paste_icon_desc))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Quick Paste from Clipboard", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.btn_quick_paste), fontWeight = FontWeight.Bold)
                     }
 
                     OutlinedTextField(
                         value = importText,
                         onValueChange = { importText = it },
-                        placeholder = { Text("Paste JSON payload structure...") },
+                        placeholder = { Text(stringResource(R.string.paste_placeholder)) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(160.dp)
@@ -2249,12 +2926,12 @@ fun DataTransferDialog(
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text(
-                                    text = "✓ Backup verified!",
+                                    text = stringResource(R.string.backup_verified),
                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
                                 Text(
-                                    text = "- Found profiles: $importPreviewProfilesCount\n- Found medications: $importPreviewMedsCount",
+                                    text = "- Found ${profilePlur.lowercase()}: $importPreviewProfilesCount\n- Found ${medicationPlur.lowercase()}: $importPreviewMedsCount",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onPrimaryContainer
                                 )
@@ -2267,16 +2944,18 @@ fun DataTransferDialog(
                         onClick = {
                             viewModel.importSchedulesJson(importText) { result ->
                                 if (result.success) {
+                                    val profWord = if (result.importedProfilesCount == 1) profileSing.lowercase() else profilePlur.lowercase()
+                                    val medWord = if (result.importedMedicationsCount == 1) medicationSing.lowercase() else medicationPlur.lowercase()
                                     Toast.makeText(
                                         context,
-                                        "Import successful! Added ${result.importedProfilesCount} profile(s) and ${result.importedMedicationsCount} schedule(s).",
+                                        "Import successful! Added ${result.importedProfilesCount} $profWord and ${result.importedMedicationsCount} $medWord.",
                                         Toast.LENGTH_LONG
                                     ).show()
                                     onDismiss()
                                 } else {
                                     Toast.makeText(
                                         context,
-                                        result.errorMessage ?: "Failed to import schedule bundle",
+                                        result.errorMessage ?: context.getString(R.string.import_failed_default),
                                         Toast.LENGTH_LONG
                                     ).show()
                                 }
@@ -2286,9 +2965,9 @@ fun DataTransferDialog(
                         modifier = Modifier.fillMaxWidth().height(48.dp).testTag("execute_import_button"),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Icon(Icons.Default.Check, "Import icon")
+                        Icon(Icons.Default.Check, stringResource(R.string.import_icon_desc))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Proceed and Import Bundle", fontWeight = FontWeight.Bold)
+                        Text(stringResource(R.string.btn_proceed_import), fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -2299,11 +2978,239 @@ fun DataTransferDialog(
                     onClick = onDismiss,
                     modifier = Modifier.align(Alignment.End).testTag("close_transfer_dialog_button")
                 ) {
-                    Text("Close")
+                    Text(stringResource(R.string.btn_close))
                 }
             }
         }
     }
+}
+
+@Composable
+fun DeveloperInfoCard(modifier: Modifier = Modifier) {
+    val uriHandler = LocalUriHandler.current
+    val developerLink = stringResource(id = R.string.developer_link)
+    val developerTag = stringResource(id = R.string.developer_info_card_tag)
+    val logoDesc = stringResource(id = R.string.company_logo_description)
+    val prefixText = stringResource(id = R.string.developer_info_prefix)
+    val nameText = stringResource(id = R.string.developer_name)
+    val suffixText = stringResource(id = R.string.developer_info_suffix)
+
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                shape = RoundedCornerShape(12.dp)
+            )
+            .clip(RoundedCornerShape(12.dp))
+            .clickable {
+                uriHandler.openUri(developerLink)
+            }
+            .testTag(developerTag),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+                .fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.White),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.m4),
+                    contentDescription = logoDesc,
+                    modifier = Modifier.size(30.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            val annotatedText = buildAnnotatedString {
+                val prefix = prefixText.trim()
+                val name = nameText.trim()
+                val suffix = suffixText.trim()
+                append("$prefix ")
+                withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
+                    append(name)
+                }
+                append(suffix)
+            }
+            Text(
+                text = annotatedText,
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                lineHeight = 18.sp,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+data class TutorialStep(val title: String, val content: String)
+
+@Composable
+fun TutorialGuideBanner(
+    currentStep: Int,
+    steps: List<TutorialStep>,
+    onNext: () -> Unit,
+    onBack: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    if (currentStep < 0 || currentStep >= steps.size) return
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(if (currentStep == 5) PaddingValues(top = 80.dp, start = 16.dp, end = 16.dp, bottom = 16.dp) else PaddingValues(16.dp)),
+        contentAlignment = if (currentStep == 5) Alignment.TopCenter else Alignment.BottomCenter
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 16.dp)
+                .shadow(12.dp, shape = RoundedCornerShape(16.dp)),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .fillMaxWidth()
+            ) {
+                // Header with step indicator and Close button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Step ${currentStep + 1} of ${steps.size}",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Close Tutorial",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Title of step
+                Text(
+                    text = steps[currentStep].title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Description content
+                Text(
+                    text = steps[currentStep].content,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                    lineHeight = 20.sp
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Navigation row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Text("Skip")
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (currentStep > 0) {
+                            OutlinedButton(
+                                onClick = onBack,
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text("Back")
+                            }
+                        }
+
+                        Button(
+                            onClick = onNext,
+                            shape = RoundedCornerShape(8.dp),
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Text(if (currentStep == steps.size - 1) "Finish" else "Next")
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun Modifier.tutorialHighlight(
+    stepIndex: Int,
+    currentStep: Int,
+    shape: Shape = RoundedCornerShape(8.dp)
+): Modifier {
+    if (currentStep != stepIndex) return this
+
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.06f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseScale"
+    )
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.8f,
+        targetValue = 0.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
+
+    return this
+        .graphicsLayer {
+            scaleX = pulseScale
+            scaleY = pulseScale
+        }
+        .border(
+            width = 3.dp,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha),
+            shape = shape
+        )
 }
 
 

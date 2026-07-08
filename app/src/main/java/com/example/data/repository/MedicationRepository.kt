@@ -29,14 +29,6 @@ class MedicationRepository(private val dao: AppDao) {
                     isMe = true
                 )
             )
-            // Seed general "Family" or just let user add their specific names
-            dao.insertFamilyMember(
-                FamilyMember(
-                    name = "Mom",
-                    colorHex = "#E91E63", // Pink
-                    isMe = false
-                )
-            )
         }
     }
 
@@ -78,5 +70,9 @@ class MedicationRepository(private val dao: AppDao) {
 
     suspend fun deleteDoseRecord(id: Long) {
         dao.deleteDoseRecord(id)
+    }
+
+    suspend fun deleteDoseRecordsByMedicationId(medicationId: Long) {
+        dao.deleteDoseRecordsByMedicationId(medicationId)
     }
 }

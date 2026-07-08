@@ -1,3 +1,136 @@
 <resources>
     <string name="app_name">MedRem</string>
+    <string name="developer_link">https://ap0calip.github.io/</string>
+    <string name="developer_name">ap0calip</string>
+    <string name="developer_info_prefix">Click to view information about the developer </string>
+    <string name="developer_info_suffix">.</string>
+    <string name="developer_info_card_tag">developer_info_card</string>
+    <string name="company_logo_description">Company Logo</string>
+
+    <!-- General UI -->
+    <string name="add_profile">Add Profile</string>
+    <string name="clinic_logo_desc">Clinic Logo</string>
+    <string name="import_export_desc">Import/Export Schedules</string>
+    <string name="profiles_filter_title">Profiles Filter</string>
+    <string name="all_profiles_label">All Profiles</string>
+    <string name="selected_desc">Selected</string>
+    <string name="profile_me_suffix"></string>
+    <string name="search_placeholder">Search medicine name or notes...</string>
+    <string name="search_icon_desc">Search icon</string>
+    <string name="clear_desc">Clear</string>
+    <string name="tab_schedules">Schedules</string>
+    <string name="schedules_list_desc">Schedules List</string>
+    <string name="tab_history">History</string>
+    <string name="logs_history_desc">Logs History</string>
+
+    <!-- Dialog / Card Buttons / General actions -->
+    <string name="btn_cancel">Cancel</string>
+    <string name="btn_delete">Delete</string>
+    <string name="btn_taken">Taken</string>
+    <string name="btn_snooze">Snooze</string>
+    <string name="btn_skip">Skip</string>
+    <string name="btn_take_all_due">Take All Due</string>
+    <string name="btn_snooze_all">Snooze All</string>
+    <string name="btn_close">Close</string>
+
+    <!-- Medication Cards -->
+    <string name="med_taken_toast">%s logged as TAKEN!</string>
+    <string name="med_skipped_toast">%s logged as SKIPPED.</string>
+    <string name="log_taken">Log Taken</string>
+    <string name="log_skipped">Log Skipped</string>
+
+    <!-- Delete Confirmations -->
+    <string name="delete_reminder_title">Delete Reminder?</string>
+    <string name="delete_reminder_desc">Are you sure you want to stop tracking and delete the reminder schedule for %s?</string>
+    <string name="unknown_date">Unknown date</string>
+
+    <!-- Profile Management -->
+    <string name="manage_add_profiles_title">Manage &amp; Add Profiles</string>
+    <string name="editing_mode">Editing Mode</string>
+    <string name="switch_create_profile">Switch to Create Profile</string>
+    <string name="profile_name_label">Profile Name (e.g. Grandma, Dad)</string>
+    <string name="choose_tag_color">Choose Tag Color</string>
+    <string name="error_empty_name">Name cannot be empty!</string>
+    <string name="btn_update_profile">Update Profile</string>
+    <string name="btn_save_profile">Save Profile</string>
+    <string name="existing_profiles">Existing Profiles</string>
+    <string name="edit_profile_desc">Edit Profile</string>
+    <string name="delete_profile_desc_icon">Delete Profile</string>
+    <string name="required">Required</string>
+    <string name="delete_profile_title">Delete Family Profile?</string>
+    <string name="delete_profile_desc">Are you sure you want to delete the profile for \"%s\"? All their history will remain but the profile itself will be removed. Action cannot be undone.</string>
+
+    <!-- Add/Edit Medication Dialog -->
+    <string name="title_new_reminder_schedule">New Reminder Schedule</string>
+    <string name="title_edit_medication_schedule">Edit Medication Schedule</string>
+    <string name="label_assign_to_profile">Assign to Profile</string>
+    <string name="med_name_label">Medication Name (e.g. Paracetamol)</string>
+    <string name="dosage_label">Dosage (e.g. 1 Tablet, 10ml)</string>
+    <string name="schedule_type_selection_title">Reminders Type Selection</string>
+    <string name="schedule_weekly_days">Weekly Days</string>
+    <string name="schedule_interval_hours">Interval Hours</string>
+    <string name="weekly_custom_days_title">Weekly Custom Days selection</string>
+    <string name="how_often_interval_title">How often? (Interval in Hours)</string>
+    <string name="alert_starting_time_title">Alert Starting Time</string>
+    <string name="twelve_hour_format">12-Hour (AM/PM)</string>
+    <string name="twenty_four_hour_format">24-Hour</string>
+    <string name="hour_label">Hour</string>
+    <string name="placeholder_dash">--</string>
+    <string name="minute_label">Minute</string>
+    <string name="am_text">AM</string>
+    <string name="pm_text">PM</string>
+    <string name="error_medication_name_required">Medication name is required!</string>
+    <string name="error_dosage_amount_required">Dosage amount is required!</string>
+    <string name="error_hour_minute_required">Hour and minute are required!</string>
+    <string name="error_hour_1_to_12">Hour must be 1 to 12</string>
+    <string name="error_hour_0_to_23">Hour must be 0 to 23</string>
+    <string name="error_minute_0_to_59">Minute must be 0 to 59</string>
+    <string name="btn_create_schedule">Create Schedule</string>
+    <string name="btn_save_changes">Save Changes</string>
+
+    <!-- Backup & Restore Dialog -->
+    <string name="backup_restore_title">Backup &amp; Restore</string>
+    <string name="export_schedules_tab">Export Schedules</string>
+    <string name="import_backup_tab">Import Backup</string>
+    <string name="export_description">Transfer schedules as a secure JSON package.</string>
+    <string name="target_profile_scope">Target Profile Scope:</string>
+    <string name="all_profiles_chip">All Profiles</string>
+    <string name="toast_copied_to_clipboard">Schedules copied to clipboard!</string>
+    <string name="btn_copy_export_json">Copy Export JSON to Clipboard</string>
+    <string name="btn_share_backup">Share Backup Package</string>
+    <string name="import_description">Paste your backup JSON package below to restore scheduled reminders.</string>
+    <string name="toast_clipboard_pasted">Clipboard content pasted!</string>
+    <string name="toast_clipboard_empty">Clipboard is empty!</string>
+    <string name="btn_quick_paste">Quick Paste from Clipboard</string>
+    <string name="paste_placeholder">Paste JSON payload structure...</string>
+    <string name="backup_verified">✓ Backup verified!</string>
+    <string name="backup_verified_details">- Found profiles: %1$d\n- Found medications: %2$d</string>
+    <string name="import_success_toast">Import successful! Added %1$d profile(s) and %2$d schedule(s).</string>
+    <string name="import_failed_default">Failed to import schedule bundle</string>
+    <string name="error_invalid_json">Invalid JSON data: %s</string>
+    <string name="btn_proceed_import">Proceed and Import Bundle</string>
+    <string name="data_transfer_icon_desc">Data Transfer Icon</string>
+    <string name="copy_icon_desc">Copy icon</string>
+    <string name="share_icon_desc">Share icon</string>
+    <string name="paste_icon_desc">Paste icon</string>
+    <string name="import_icon_desc">Import icon</string>
+
+    <!-- Notification & Alarms channels / content -->
+    <string name="notification_channel_reminders_name">Medication Reminders</string>
+    <string name="notification_channel_reminders_desc">Urgent notifications for medicine schedule intake times.</string>
+    <string name="notification_channel_alarms_name">Medication Alarms</string>
+    <string name="notification_channel_alarms_desc">High-priority alarms with sound and visual overlays.</string>
+    <string name="notification_default_profile_name">Me</string>
+    <string name="notification_action_taken">Taken</string>
+    <string name="notification_action_snooze">Snooze</string>
+    <string name="notification_action_taken_all">Taken All</string>
+    <string name="notification_action_snooze_all">Snooze All</string>
+    <string name="notification_multiple_due">Multiple Medications Due</string>
+    <string name="notification_multiple_due_desc">%1$d medications can be taken: %2$s</string>
+
+    <!-- Alarm Activity -->
+    <string name="alarm_activity_title">Medication Reminder</string>
+    <string name="alarm_activity_doses_due">You have %d doses due now:</string>
+    <string name="btn_take_all">Take All</string>
+    <string name="btn_snooze_all_label">Snooze All</string>
 </resources>

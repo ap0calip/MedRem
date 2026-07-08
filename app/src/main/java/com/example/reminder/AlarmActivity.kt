@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.database.AppDatabase
 import com.example.ui.theme.MyApplicationTheme
+import com.example.R
+import androidx.compose.ui.res.stringResource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -107,6 +109,36 @@ fun AlarmScreen(
     val context = LocalContext.current
     val activeAlarms by ActiveAlarmManager.activeAlarms.collectAsState()
 
+    val prefs = remember(context) { context.getSharedPreferences("MedRemPrefs", Context.MODE_PRIVATE) }
+    val labelMode = remember(prefs) { prefs.getString("label_mode", "ITEM") ?: "ITEM" }
+
+    val medicationSing = remember(prefs, labelMode) {
+        when (labelMode) {
+            "MEDICATION" -> "Medication"
+            "ITEM" -> "Item"
+            "CUSTOM" -> prefs.getString("custom_med_sing", "Medication") ?: "Medication"
+            else -> "Medication"
+        }
+    }
+
+    val medicationPlur = remember(prefs, labelMode) {
+        when (labelMode) {
+            "MEDICATION" -> "Medications"
+            "ITEM" -> "Items"
+            "CUSTOM" -> prefs.getString("custom_med_plur", "Medications") ?: "Medications"
+            else -> "Medications"
+        }
+    }
+
+    val takenLabel = remember(prefs, labelMode) {
+        when (labelMode) {
+            "MEDICATION" -> "Taken"
+            "ITEM" -> "Completed"
+            "CUSTOM" -> prefs.getString("custom_taken_label", "Taken") ?: "Taken"
+            else -> "Taken"
+        }
+    }
+
     androidx.activity.compose.BackHandler {
         // Map back button to the Snooze All action to stop sound and dismiss activity
         val svcIntent = Intent(context, MedicationAlarmService::class.java).apply {
@@ -144,13 +176,13 @@ fun AlarmScreen(
             ) {
                 Icon(
                     imageVector = Icons.Default.NotificationsActive,
-                    contentDescription = "Alert Active Icon",
+                    contentDescription = stringResource(R.string.company_logo_description),
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(36.dp)
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
-                    text = "Medication Reminder",
+                    text = "$medicationSing Reminder",
                     style = MaterialTheme.typography.headlineSmall.copy(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
@@ -163,6 +195,8 @@ fun AlarmScreen(
                 val rem = activeAlarms.first()
                 SingleAlarmLayout(
                     reminder = rem,
+                    medicationSing = medicationSing,
+                    takenLabel = takenLabel,
                     onActionTaken = onActionTaken
                 )
             } else if (activeAlarms.isNotEmpty()) {
@@ -174,7 +208,7 @@ fun AlarmScreen(
                         .padding(vertical = 12.dp)
                 ) {
                     Text(
-                        text = "You have ${activeAlarms.size} doses due now:",
+                        text = "You have ${activeAlarms.size} ${if (activeAlarms.size == 1) medicationSing.lowercase() else medicationPlur.lowercase()} due now:",
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Medium),
                         color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f),
                         modifier = Modifier.padding(bottom = 12.dp)
@@ -189,6 +223,7 @@ fun AlarmScreen(
                         items(activeAlarms, key = { it.medId }) { rem ->
                             MultiAlarmCard(
                                 reminder = rem,
+                                takenLabel = takenLabel,
                                 onAction = { action ->
                                     val svcIntent = Intent(context, MedicationAlarmService::class.java).apply {
                                         this.action = action
@@ -228,7 +263,7 @@ fun AlarmScreen(
                             .testTag("alarm_action_dismiss_all"),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Text("Snooze All", style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold))
+                        Text(stringResource(R.string.btn_snooze_all_label), style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold))
                     }
 
                     Button(
@@ -248,7 +283,7 @@ fun AlarmScreen(
                             .testTag("alarm_action_take_all"),
                         shape = RoundedCornerShape(16.dp)
                     ) {
-                        Text("Take All", style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold), color = Color.White)
+                        Text("$takenLabel All", style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold), color = Color.White)
                     }
                 }
             } else {
@@ -269,10 +304,13 @@ fun AlarmScreen(
 @Composable
 fun SingleAlarmLayout(
     reminder: ActiveReminder,
+    medicationSing: String,
+    takenLabel: String,
     onActionTaken: () -> Unit
 ) {
     val context = LocalContext.current
-    var familyMemberName by remember { mutableStateOf("Me") }
+    val defaultProfileName = stringResource(R.string.notification_default_profile_name)
+    var familyMemberName by remember(defaultProfileName) { mutableStateOf(defaultProfileName) }
     var familyMemberColorHex by remember { mutableStateOf("#B00020") } // default deep red
 
     LaunchedEffect(reminder.familyMemberId) {
@@ -338,7 +376,7 @@ fun SingleAlarmLayout(
             ) {
                 Icon(
                     imageVector = Icons.Default.NotificationsActive,
-                    contentDescription = "Alarm Active Icon",
+                    contentDescription = stringResource(R.string.company_logo_description),
                     tint = memberColor,
                     modifier = Modifier
                         .size(80.dp)
@@ -416,11 +454,11 @@ fun SingleAlarmLayout(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Block,
-                            contentDescription = "Block Icon"
+                            contentDescription = stringResource(R.string.btn_skip)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Skip",
+                            text = stringResource(R.string.btn_skip),
                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                         )
                     }
@@ -448,11 +486,11 @@ fun SingleAlarmLayout(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Alarm,
-                            contentDescription = "Alarm Dismiss Icon"
+                            contentDescription = stringResource(R.string.btn_snooze)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "Snooze",
+                            text = stringResource(R.string.btn_snooze),
                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
                         )
                     }
@@ -486,12 +524,12 @@ fun SingleAlarmLayout(
                 ) {
                     Icon(
                         imageVector = Icons.Default.Check,
-                        contentDescription = "Check Icon",
+                        contentDescription = takenLabel,
                         tint = Color.White
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
-                        text = "Taken",
+                        text = takenLabel,
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold,
                             fontSize = 18.sp,
@@ -507,10 +545,12 @@ fun SingleAlarmLayout(
 @Composable
 fun MultiAlarmCard(
     reminder: ActiveReminder,
+    takenLabel: String,
     onAction: (String) -> Unit
 ) {
     val context = LocalContext.current
-    var familyMemberName by remember { mutableStateOf("Me") }
+    val defaultProfileName = stringResource(R.string.notification_default_profile_name)
+    var familyMemberName by remember(defaultProfileName) { mutableStateOf(defaultProfileName) }
     var familyMemberColorHex by remember { mutableStateOf("#B00020") }
 
     LaunchedEffect(reminder.familyMemberId) {
@@ -587,7 +627,7 @@ fun MultiAlarmCard(
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                 ) {
-                    Text("Skip", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
+                    Text(stringResource(R.string.btn_skip), style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
                 }
 
                 OutlinedButton(
@@ -603,7 +643,7 @@ fun MultiAlarmCard(
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                 ) {
-                    Text("Snooze", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
+                    Text(stringResource(R.string.btn_snooze), style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
                 }
 
                 Button(
@@ -618,7 +658,7 @@ fun MultiAlarmCard(
                     shape = RoundedCornerShape(8.dp),
                     contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
                 ) {
-                    Text("Taken", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = Color.White)
+                    Text(takenLabel, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = Color.White)
                 }
             }
         }
