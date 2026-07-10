@@ -100,12 +100,13 @@ class MedicationAlarmService : Service() {
         val dosage = intent.getStringExtra("MED_DOSAGE") ?: ""
         val instructions = intent.getStringExtra("MED_INSTRUCTIONS") ?: ""
         val familyMemberId = intent.getLongExtra("FAMILY_MEMBER_ID", -1L)
+        val snoozeMinutes = intent.getIntExtra("SNOOZE_MINUTES", 30)
 
-        Log.d(TAG, "onStartCommand: action=$action, medId=$medId, medName=$medName")
+        Log.d(TAG, "onStartCommand: action=$action, medId=$medId, medName=$medName, snoozeMinutes=$snoozeMinutes")
 
         if (action == ACTION_TAKE || action == ACTION_SKIP || action == ACTION_DISMISS ||
             action == ACTION_TAKE_ALL || action == ACTION_DISMISS_ALL) {
-            handleServiceAction(action, medId, medName, dosage)
+            handleServiceAction(action, medId, medName, dosage, snoozeMinutes)
             return START_NOT_STICKY
         }
 
@@ -305,6 +306,7 @@ class MedicationAlarmService : Service() {
             val snoozeIntent = Intent(this, MedicationAlarmService::class.java).apply {
                 action = ACTION_DISMISS
                 putExtra("MED_ID", rem.medId)
+                putExtra("SNOOZE_MINUTES", 5)
             }
             val snoozePendingIntent = PendingIntent.getService(
                 this,
@@ -315,6 +317,7 @@ class MedicationAlarmService : Service() {
 
             builder.addAction(android.R.drawable.checkbox_on_background, takenLabel, takePendingIntent)
             builder.addAction(android.R.drawable.ic_lock_idle_alarm, getString(R.string.notification_action_snooze), snoozePendingIntent)
+            builder.setDeleteIntent(snoozePendingIntent)
         } else {
             // Find all unique profile names for the active reminders
             val profileNames = list.map { rem ->
@@ -347,6 +350,7 @@ class MedicationAlarmService : Service() {
 
             val snoozeAllIntent = Intent(this, MedicationAlarmService::class.java).apply {
                 action = ACTION_DISMISS_ALL
+                putExtra("SNOOZE_MINUTES", 5)
             }
             val snoozeAllPendingIntent = PendingIntent.getService(
                 this,
@@ -357,6 +361,7 @@ class MedicationAlarmService : Service() {
 
             builder.addAction(android.R.drawable.checkbox_on_background, "$takenLabel All", takeAllPendingIntent)
             builder.addAction(android.R.drawable.ic_lock_idle_alarm, getString(R.string.notification_action_snooze_all), snoozeAllPendingIntent)
+            builder.setDeleteIntent(snoozeAllPendingIntent)
         }
 
         val notification = builder.build()
@@ -373,7 +378,7 @@ class MedicationAlarmService : Service() {
         notificationManager.notify(8888, notification)
     }
 
-    private fun handleServiceAction(action: String, medId: Long, medName: String, dosage: String) {
+    private fun handleServiceAction(action: String, medId: Long, medName: String, dosage: String, snoozeMinutes: Int = 30) {
         serviceScope.launch {
             try {
                 val db = AppDatabase.getDatabase(applicationContext)
@@ -416,7 +421,7 @@ class MedicationAlarmService : Service() {
                     alarmsToHandle.forEach { rem ->
                         val medication = dao.getMedicationById(rem.medId)
                         if (medication != null) {
-                            val snoozeTime = now + 30 * 60 * 1000L
+                            val snoozeTime = now + snoozeMinutes * 60 * 1000L
                             val updatedMed = medication.copy(snoozedUntil = snoozeTime)
                             dao.insertMedication(updatedMed)
                             ReminderScheduler.scheduleSnoozeAlarm(applicationContext, updatedMed, snoozeTime)
@@ -429,7 +434,7 @@ class MedicationAlarmService : Service() {
 
                     if (action == ACTION_DISMISS) {
                         if (medication != null) {
-                            val snoozeTime = now + 30 * 60 * 1000L
+                            val snoozeTime = now + snoozeMinutes * 60 * 1000L
                             val updatedMed = medication.copy(snoozedUntil = snoozeTime)
                             dao.insertMedication(updatedMed)
                             ReminderScheduler.scheduleSnoozeAlarm(applicationContext, updatedMed, snoozeTime)

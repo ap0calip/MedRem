@@ -62,6 +62,7 @@ import com.example.data.entity.FamilyMember
 import com.example.data.entity.Medication
 import com.example.ui.theme.MyApplicationTheme
 import com.example.viewmodel.MedicationViewModel
+import com.example.ui.SnoozeDurationDialog
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -2445,6 +2446,9 @@ fun ActiveAlarmsBanner(
     val familyMembers by viewModel.familyMembers.collectAsState()
     val takenLabel by viewModel.currentTakenLabel.collectAsState()
 
+    var showSnoozeDurationDialog by remember { mutableStateOf(false) }
+    var snoozeTargetAlarmId by remember { mutableStateOf<Long?>(null) } // null means Snooze All, non-null is individual med ID
+
     if (activeAlarms.isEmpty()) return
 
     val defaultErrorColor = MaterialTheme.colorScheme.error
@@ -2566,11 +2570,8 @@ fun ActiveAlarmsBanner(
                                 // Snooze Button
                                 OutlinedButton(
                                     onClick = {
-                                        val svcIntent = Intent(context, com.example.reminder.MedicationAlarmService::class.java).apply {
-                                            action = com.example.reminder.MedicationAlarmService.ACTION_DISMISS
-                                            putExtra("MED_ID", alarm.medId)
-                                        }
-                                        context.startService(svcIntent)
+                                        snoozeTargetAlarmId = alarm.medId
+                                        showSnoozeDurationDialog = true
                                     },
                                     colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
                                     modifier = Modifier.weight(1.0f).height(38.dp).testTag("banner_action_snooze_${alarm.medId}"),
@@ -2631,10 +2632,8 @@ fun ActiveAlarmsBanner(
 
                     OutlinedButton(
                         onClick = {
-                            val svcIntent = Intent(context, com.example.reminder.MedicationAlarmService::class.java).apply {
-                                action = com.example.reminder.MedicationAlarmService.ACTION_DISMISS_ALL
-                            }
-                            context.startService(svcIntent)
+                            snoozeTargetAlarmId = null
+                            showSnoozeDurationDialog = true
                         },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = defaultErrorColor),
                         border = androidx.compose.foundation.BorderStroke(1.5.dp, defaultErrorColor),
@@ -2646,6 +2645,26 @@ fun ActiveAlarmsBanner(
                 }
             }
         }
+    }
+
+    if (showSnoozeDurationDialog) {
+        SnoozeDurationDialog(
+            onDismiss = { showSnoozeDurationDialog = false },
+            onConfirm = { minutes ->
+                val targetId = snoozeTargetAlarmId
+                val svcIntent = Intent(context, com.example.reminder.MedicationAlarmService::class.java).apply {
+                    if (targetId == null) {
+                        action = com.example.reminder.MedicationAlarmService.ACTION_DISMISS_ALL
+                    } else {
+                        action = com.example.reminder.MedicationAlarmService.ACTION_DISMISS
+                        putExtra("MED_ID", targetId)
+                    }
+                    putExtra("SNOOZE_MINUTES", minutes)
+                }
+                context.startService(svcIntent)
+                showSnoozeDurationDialog = false
+            }
+        )
     }
 }
 

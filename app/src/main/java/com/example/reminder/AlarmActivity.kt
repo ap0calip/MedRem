@@ -109,6 +109,9 @@ fun AlarmScreen(
     val context = LocalContext.current
     val activeAlarms by ActiveAlarmManager.activeAlarms.collectAsState()
 
+    var showSnoozeDurationDialog by remember { mutableStateOf(false) }
+    var snoozeTargetAlarmId by remember { mutableStateOf<Long?>(null) } // null means Snooze All
+
     val prefs = remember(context) { context.getSharedPreferences("MedRemPrefs", Context.MODE_PRIVATE) }
     val labelMode = remember(prefs) { prefs.getString("label_mode", "ITEM") ?: "ITEM" }
 
@@ -197,7 +200,11 @@ fun AlarmScreen(
                     reminder = rem,
                     medicationSing = medicationSing,
                     takenLabel = takenLabel,
-                    onActionTaken = onActionTaken
+                    onActionTaken = onActionTaken,
+                    onSnoozeClick = { medId ->
+                        snoozeTargetAlarmId = medId
+                        showSnoozeDurationDialog = true
+                    }
                 )
             } else if (activeAlarms.isNotEmpty()) {
                 // Multi-Alarm Layout: Beautiful list of cards with individual actions
@@ -232,6 +239,10 @@ fun AlarmScreen(
                                         putExtra("MED_DOSAGE", rem.dosage)
                                     }
                                     context.startService(svcIntent)
+                                },
+                                onSnoozeClick = { medId ->
+                                    snoozeTargetAlarmId = medId
+                                    showSnoozeDurationDialog = true
                                 }
                             )
                         }
@@ -247,11 +258,8 @@ fun AlarmScreen(
                 ) {
                     OutlinedButton(
                         onClick = {
-                            val svcIntent = Intent(context, MedicationAlarmService::class.java).apply {
-                                action = MedicationAlarmService.ACTION_DISMISS_ALL
-                            }
-                            context.startService(svcIntent)
-                            onActionTaken()
+                            snoozeTargetAlarmId = null
+                            showSnoozeDurationDialog = true
                         },
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = MaterialTheme.colorScheme.error
@@ -299,6 +307,27 @@ fun AlarmScreen(
             }
         }
     }
+
+    if (showSnoozeDurationDialog) {
+        com.example.ui.SnoozeDurationDialog(
+            onDismiss = { showSnoozeDurationDialog = false },
+            onConfirm = { minutes ->
+                val targetId = snoozeTargetAlarmId
+                val svcIntent = Intent(context, MedicationAlarmService::class.java).apply {
+                    if (targetId == null) {
+                        action = MedicationAlarmService.ACTION_DISMISS_ALL
+                    } else {
+                        action = MedicationAlarmService.ACTION_DISMISS
+                        putExtra("MED_ID", targetId)
+                    }
+                    putExtra("SNOOZE_MINUTES", minutes)
+                }
+                context.startService(svcIntent)
+                showSnoozeDurationDialog = false
+                onActionTaken()
+            }
+        )
+    }
 }
 
 @Composable
@@ -306,7 +335,8 @@ fun SingleAlarmLayout(
     reminder: ActiveReminder,
     medicationSing: String,
     takenLabel: String,
-    onActionTaken: () -> Unit
+    onActionTaken: () -> Unit,
+    onSnoozeClick: (Long) -> Unit
 ) {
     val context = LocalContext.current
     val defaultProfileName = stringResource(R.string.notification_default_profile_name)
@@ -467,12 +497,7 @@ fun SingleAlarmLayout(
                 // Action 3: Snooze
                 FilledTonalButton(
                     onClick = {
-                        val svcIntent = Intent(context, MedicationAlarmService::class.java).apply {
-                            action = MedicationAlarmService.ACTION_DISMISS
-                            putExtra("MED_ID", reminder.medId)
-                        }
-                        context.startService(svcIntent)
-                        onActionTaken()
+                        onSnoozeClick(reminder.medId)
                     },
                     modifier = Modifier
                         .weight(1f)
@@ -546,7 +571,8 @@ fun SingleAlarmLayout(
 fun MultiAlarmCard(
     reminder: ActiveReminder,
     takenLabel: String,
-    onAction: (String) -> Unit
+    onAction: (String) -> Unit,
+    onSnoozeClick: (Long) -> Unit
 ) {
     val context = LocalContext.current
     val defaultProfileName = stringResource(R.string.notification_default_profile_name)
@@ -631,7 +657,7 @@ fun MultiAlarmCard(
                 }
 
                 OutlinedButton(
-                    onClick = { onAction(MedicationAlarmService.ACTION_DISMISS) },
+                    onClick = { onSnoozeClick(reminder.medId) },
                     colors = ButtonDefaults.outlinedButtonColors(
                         contentColor = memberColor
                     ),
