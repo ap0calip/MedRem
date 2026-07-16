@@ -33,6 +33,19 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
     init {
         val dao = AppDatabase.getDatabase(application).dao()
         repository = MedicationRepository(dao)
+
+        // Reschedule active alarms on startup in case they were lost or restored from Auto Backup
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val activeMeds = dao.getAllActiveMedications()
+                for (med in activeMeds) {
+                    ReminderScheduler.scheduleAlarm(application, med)
+                }
+                Log.d("MedicationViewModel", "Alarms rescheduled on ViewModel init for ${activeMeds.size} active medications.")
+            } catch (e: Exception) {
+                Log.e("MedicationViewModel", "Failed to reschedule alarms on ViewModel init: ${e.message}", e)
+            }
+        }
     }
 
     // --- Dynamic Labels ---

@@ -1002,6 +1002,8 @@ fun MedicationReminderCard(
 ) {
     val context = LocalContext.current
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var pendingActionType by remember { mutableStateOf<String?>(null) } // "TAKE" or "SKIP"
+    var showConfirmEarlyActionDialog by remember { mutableStateOf(false) }
 
     val memberColor = remember(member?.colorHex) {
         try { Color(android.graphics.Color.parseColor(member?.colorHex ?: "#757575")) }
@@ -1186,8 +1188,20 @@ fun MedicationReminderCard(
                 ) {
                     Button(
                         onClick = {
-                            onTakeDose()
-                            Toast.makeText(context, "${medication.name} logged as ${takenLabel.uppercase()}!", Toast.LENGTH_SHORT).show()
+                            val currentTime = System.currentTimeMillis()
+                            val nextReminderTime = if (medication.snoozedUntil > currentTime) {
+                                medication.snoozedUntil
+                            } else {
+                                com.example.reminder.ReminderScheduler.getNextTriggerTime(medication, currentTime)
+                            }
+                            val isMoreThan30MinAway = (nextReminderTime - currentTime) > 30 * 60 * 1000L
+                            if (isMoreThan30MinAway) {
+                                pendingActionType = "TAKE"
+                                showConfirmEarlyActionDialog = true
+                            } else {
+                                onTakeDose()
+                                Toast.makeText(context, "${medication.name} logged as ${takenLabel.uppercase()}!", Toast.LENGTH_SHORT).show()
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                         modifier = Modifier
@@ -1203,8 +1217,20 @@ fun MedicationReminderCard(
 
                     OutlinedButton(
                         onClick = {
-                            onSkipDose()
-                            Toast.makeText(context, "${medication.name} logged as SKIPPED.", Toast.LENGTH_SHORT).show()
+                            val currentTime = System.currentTimeMillis()
+                            val nextReminderTime = if (medication.snoozedUntil > currentTime) {
+                                medication.snoozedUntil
+                            } else {
+                                com.example.reminder.ReminderScheduler.getNextTriggerTime(medication, currentTime)
+                            }
+                            val isMoreThan30MinAway = (nextReminderTime - currentTime) > 30 * 60 * 1000L
+                            if (isMoreThan30MinAway) {
+                                pendingActionType = "SKIP"
+                                showConfirmEarlyActionDialog = true
+                            } else {
+                                onSkipDose()
+                                Toast.makeText(context, "${medication.name} logged as SKIPPED.", Toast.LENGTH_SHORT).show()
+                            }
                         },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)),
                         modifier = Modifier
@@ -1221,6 +1247,47 @@ fun MedicationReminderCard(
                 }
             }
         }
+    }
+
+    if (showConfirmEarlyActionDialog) {
+        val actionText = if (pendingActionType == "TAKE") takenLabel else "Skipped"
+        AlertDialog(
+            onDismissRequest = {
+                showConfirmEarlyActionDialog = false
+                pendingActionType = null
+            },
+            title = { Text("Confirm Action") },
+            text = { Text("This reminder is scheduled for more than 30 minutes from now. Are you sure you want to mark it as $actionText early?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (pendingActionType == "TAKE") {
+                            onTakeDose()
+                            Toast.makeText(context, "${medication.name} logged as ${takenLabel.uppercase()}!", Toast.LENGTH_SHORT).show()
+                        } else if (pendingActionType == "SKIP") {
+                            onSkipDose()
+                            Toast.makeText(context, "${medication.name} logged as SKIPPED.", Toast.LENGTH_SHORT).show()
+                        }
+                        showConfirmEarlyActionDialog = false
+                        pendingActionType = null
+                    },
+                    modifier = Modifier.testTag("confirm_early_action_button")
+                ) {
+                    Text("Confirm", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showConfirmEarlyActionDialog = false
+                        pendingActionType = null
+                    },
+                    modifier = Modifier.testTag("cancel_early_action_button")
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
     }
 
     if (showDeleteConfirm) {

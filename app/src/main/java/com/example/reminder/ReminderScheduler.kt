@@ -160,7 +160,11 @@ object ReminderScheduler {
         }
 
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
-        val nextTrigger = getNextTriggerTime(medication)
+        val nextTrigger = if (medication.snoozedUntil > System.currentTimeMillis()) {
+            medication.snoozedUntil
+        } else {
+            getNextTriggerTime(medication)
+        }
 
         val intent = Intent(context, MedicationAlarmReceiver::class.java).apply {
             putExtra("MED_ID", medication.id)
