@@ -308,8 +308,26 @@ fun AlarmScreen(
         }
     }
 
+    var targetMedication by remember(snoozeTargetAlarmId) { mutableStateOf<com.example.data.entity.Medication?>(null) }
+    LaunchedEffect(snoozeTargetAlarmId) {
+        val tid = snoozeTargetAlarmId
+        if (tid != null) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val db = AppDatabase.getDatabase(context)
+                    targetMedication = db.dao().getMedicationById(tid)
+                } catch (e: Exception) {
+                    Log.e("AlarmActivity", "Failed to fetch target medication: ${e.message}")
+                }
+            }
+        } else {
+            targetMedication = null
+        }
+    }
+
     if (showSnoozeDurationDialog) {
         com.example.ui.SnoozeDurationDialog(
+            medication = targetMedication,
             onDismiss = { showSnoozeDurationDialog = false },
             onConfirm = { minutes ->
                 val targetId = snoozeTargetAlarmId
@@ -342,20 +360,21 @@ fun SingleAlarmLayout(
     val defaultProfileName = stringResource(R.string.notification_default_profile_name)
     var familyMemberName by remember(defaultProfileName) { mutableStateOf(defaultProfileName) }
     var familyMemberColorHex by remember { mutableStateOf("#B00020") } // default deep red
+    var soundName by remember { mutableStateOf("") }
 
-    LaunchedEffect(reminder.familyMemberId) {
-        if (reminder.familyMemberId != -1L) {
-            withContext(Dispatchers.IO) {
-                try {
-                    val db = AppDatabase.getDatabase(context)
-                    val member = db.dao().getFamilyMemberById(reminder.familyMemberId)
-                    if (member != null) {
-                        familyMemberName = member.name
-                        familyMemberColorHex = member.colorHex
-                    }
-                } catch (e: Exception) {
-                    Log.e("AlarmActivity", "Failed to fetch family member detail: ${e.message}")
+    LaunchedEffect(reminder.medId, reminder.familyMemberId) {
+        withContext(Dispatchers.IO) {
+            try {
+                val db = AppDatabase.getDatabase(context)
+                val member = if (reminder.familyMemberId != -1L) db.dao().getFamilyMemberById(reminder.familyMemberId) else null
+                val med = if (reminder.medId != -1L) db.dao().getMedicationById(reminder.medId) else null
+                if (member != null) {
+                    familyMemberName = member.name
+                    familyMemberColorHex = member.colorHex
                 }
+                soundName = com.example.SoundUtils.getSoundName(context, med?.soundUri, member?.soundUri)
+            } catch (e: Exception) {
+                Log.e("AlarmActivity", "Failed to fetch family member detail: ${e.message}")
             }
         }
     }
@@ -441,6 +460,16 @@ fun SingleAlarmLayout(
                     textAlign = TextAlign.Center,
                     modifier = Modifier.testTag("alarm_dosage")
                 )
+
+                if (soundName.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Sound: $soundName",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = memberColor.copy(alpha = 0.7f),
+                        textAlign = TextAlign.Center
+                    )
+                }
             }
         }
 
@@ -578,19 +607,20 @@ fun MultiAlarmCard(
     val defaultProfileName = stringResource(R.string.notification_default_profile_name)
     var familyMemberName by remember(defaultProfileName) { mutableStateOf(defaultProfileName) }
     var familyMemberColorHex by remember { mutableStateOf("#B00020") }
+    var soundName by remember { mutableStateOf("") }
 
-    LaunchedEffect(reminder.familyMemberId) {
-        if (reminder.familyMemberId != -1L) {
-            withContext(Dispatchers.IO) {
-                try {
-                    val db = AppDatabase.getDatabase(context)
-                    val member = db.dao().getFamilyMemberById(reminder.familyMemberId)
-                    if (member != null) {
-                        familyMemberName = member.name
-                        familyMemberColorHex = member.colorHex
-                    }
-                } catch (e: Exception) {}
-            }
+    LaunchedEffect(reminder.medId, reminder.familyMemberId) {
+        withContext(Dispatchers.IO) {
+            try {
+                val db = AppDatabase.getDatabase(context)
+                val member = if (reminder.familyMemberId != -1L) db.dao().getFamilyMemberById(reminder.familyMemberId) else null
+                val med = if (reminder.medId != -1L) db.dao().getMedicationById(reminder.medId) else null
+                if (member != null) {
+                    familyMemberName = member.name
+                    familyMemberColorHex = member.colorHex
+                }
+                soundName = com.example.SoundUtils.getSoundName(context, med?.soundUri, member?.soundUri)
+            } catch (e: Exception) {}
         }
     }
 
@@ -630,6 +660,13 @@ fun MultiAlarmCard(
                         style = MaterialTheme.typography.bodyMedium,
                         color = memberColor.copy(alpha = 0.8f)
                     )
+                    if (soundName.isNotEmpty()) {
+                        Text(
+                            text = "Sound: $soundName",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = memberColor.copy(alpha = 0.7f)
+                        )
+                    }
                 }
             }
 
@@ -648,10 +685,10 @@ fun MultiAlarmCard(
                     border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error),
                     modifier = Modifier
                         .weight(1f)
-                        .height(40.dp)
+                        .defaultMinSize(minHeight = 40.dp)
                         .testTag("alarm_action_skip_${reminder.medId}"),
                     shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
                 ) {
                     Text(stringResource(R.string.btn_skip), style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
                 }
@@ -664,10 +701,10 @@ fun MultiAlarmCard(
                     border = androidx.compose.foundation.BorderStroke(1.dp, memberColor),
                     modifier = Modifier
                         .weight(1f)
-                        .height(40.dp)
+                        .defaultMinSize(minHeight = 40.dp)
                         .testTag("alarm_action_dismiss_${reminder.medId}"),
                     shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
                 ) {
                     Text(stringResource(R.string.btn_snooze), style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
                 }
@@ -679,10 +716,10 @@ fun MultiAlarmCard(
                     ),
                     modifier = Modifier
                         .weight(1.2f)
-                        .height(40.dp)
+                        .defaultMinSize(minHeight = 40.dp)
                         .testTag("alarm_action_take_${reminder.medId}"),
                     shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)
                 ) {
                     Text(takenLabel, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = Color.White)
                 }

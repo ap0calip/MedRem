@@ -10,6 +10,7 @@ data class FamilyMember(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val colorHex: String, // Hex string represent color of tag
+    val soundUri: String = "",
     val isMe: Boolean = false
 )
 
@@ -39,7 +40,8 @@ data class Medication(
     val isActive: Boolean = true,
     val snoozedUntil: Long = 0L,
     val lastLoggedTime: Long = 0L,
-    val autoReset: Boolean = false
+    val autoReset: Boolean = false,
+    val soundUri: String = ""
 )
 
 @Entity(tableName = "dose_records")

@@ -56,4 +56,7 @@ interface AppDao {
 
     @Query("DELETE FROM dose_records WHERE medicationId = :medicationId")
     suspend fun deleteDoseRecordsByMedicationId(medicationId: Long)
+
+    @Query("DELETE FROM dose_records WHERE familyMemberName = :familyMemberName")
+    suspend fun deleteDoseRecordsByFamilyMemberName(familyMemberName: String)
 }

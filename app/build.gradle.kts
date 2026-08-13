@@ -14,8 +14,8 @@ android {
     applicationId = "com.aistudio.medred.kfsqwz"
     minSdk = 24
     targetSdk = 36
-    versionCode = 13
-    versionName = "13.0"
+    versionCode = 37
+    versionName = "37.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

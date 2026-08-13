@@ -26,11 +26,13 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
         val dosage = intent.getStringExtra("MED_DOSAGE") ?: ""
         val instructions = intent.getStringExtra("MED_INSTRUCTIONS") ?: ""
         val familyMemberId = intent.getLongExtra("FAMILY_MEMBER_ID", -1L)
+        val soundUri = intent.getStringExtra("SOUND_URI") ?: ""
 
         Log.d(TAG, "onReceive: action=$action, medId=$medId, medName=$medName")
 
         if (action == ACTION_TAKE || action == ACTION_SKIP || action == ACTION_SNOOZE) {
-            handleNotificationAction(context, action, medId, medName, dosage)
+            val snoozeMinutes = intent.getIntExtra("SNOOZE_MINUTES", 30)
+            handleNotificationAction(context, action, medId, medName, dosage, snoozeMinutes)
             return
         }
 
@@ -46,6 +48,7 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
                     putExtra("MED_DOSAGE", dosage)
                     putExtra("MED_INSTRUCTIONS", instructions)
                     putExtra("FAMILY_MEMBER_ID", familyMemberId)
+                    putExtra("SOUND_URI", soundUri)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(serviceIntent)
@@ -127,17 +130,33 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Intent for "Snooze" action button (replacing "Skip")
+        // Intent for "Snooze" action button
         val snoozeIntent = Intent(context, MedicationAlarmReceiver::class.java).apply {
             setAction(ACTION_SNOOZE)
             putExtra("MED_ID", medId)
             putExtra("MED_NAME", medName)
             putExtra("MED_DOSAGE", dosage)
+            putExtra("SNOOZE_MINUTES", 30)
         }
         val snoozePendingIntent = PendingIntent.getBroadcast(
             context,
             medId.toInt() * 10 + 2,
             snoozeIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // Intent for closing/dismissing notification (deleteIntent)
+        val dismissIntent = Intent(context, MedicationAlarmReceiver::class.java).apply {
+            setAction(ACTION_SNOOZE)
+            putExtra("MED_ID", medId)
+            putExtra("MED_NAME", medName)
+            putExtra("MED_DOSAGE", dosage)
+            putExtra("SNOOZE_MINUTES", 5)
+        }
+        val dismissPendingIntent = PendingIntent.getBroadcast(
+            context,
+            medId.toInt() * 10 + 3,
+            dismissIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -152,6 +171,7 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
                 .addAction(android.R.drawable.checkbox_on_background, context.getString(R.string.notification_action_taken), takePendingIntent)
                 .addAction(android.R.drawable.ic_lock_idle_alarm, context.getString(R.string.notification_action_snooze), snoozePendingIntent)
+                .setDeleteIntent(dismissPendingIntent)
 
             try {
                 builder.setColor(android.graphics.Color.parseColor(profileColorHex))
@@ -184,7 +204,8 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
         action: String,
         medId: Long,
         medName: String,
-        dosage: String
+        dosage: String,
+        snoozeMinutes: Int = 30
     ) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.cancel(medId.toInt())
@@ -196,11 +217,11 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
                     val dao = db.dao()
                     val medication = dao.getMedicationById(medId)
                     if (medication != null) {
-                        val snoozeTime = System.currentTimeMillis() + 30 * 60 * 1000L
+                        val snoozeTime = System.currentTimeMillis() + snoozeMinutes * 60 * 1000L
                         val updatedMed = medication.copy(snoozedUntil = snoozeTime)
                         dao.insertMedication(updatedMed)
                         ReminderScheduler.scheduleSnoozeAlarm(context, updatedMed, snoozeTime)
-                        Log.d(TAG, "Snoozed from receiver action: medName=$medName until $snoozeTime")
+                        Log.d(TAG, "Snoozed from receiver action: medName=$medName for $snoozeMinutes mins until $snoozeTime")
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Error snoozing in NotificationAction: ${e.message}", e)

@@ -75,4 +75,8 @@ class MedicationRepository(private val dao: AppDao) {
     suspend fun deleteDoseRecordsByMedicationId(medicationId: Long) {
         dao.deleteDoseRecordsByMedicationId(medicationId)
     }
+
+    suspend fun deleteDoseRecordsByFamilyMemberName(familyMemberName: String) {
+        dao.deleteDoseRecordsByFamilyMemberName(familyMemberName)
+    }
 }

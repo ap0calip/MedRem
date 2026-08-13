@@ -74,8 +74,6 @@ class MedicationAlarmService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "onCreate: MedicationAlarmService started")
-        startAlarmSound()
-        startVibration()
 
         serviceScope.launch {
             ActiveAlarmManager.activeAlarms.collect { list ->
@@ -101,8 +99,9 @@ class MedicationAlarmService : Service() {
         val instructions = intent.getStringExtra("MED_INSTRUCTIONS") ?: ""
         val familyMemberId = intent.getLongExtra("FAMILY_MEMBER_ID", -1L)
         val snoozeMinutes = intent.getIntExtra("SNOOZE_MINUTES", 30)
+        val soundUriStr = intent.getStringExtra("SOUND_URI")
 
-        Log.d(TAG, "onStartCommand: action=$action, medId=$medId, medName=$medName, snoozeMinutes=$snoozeMinutes")
+        Log.d(TAG, "onStartCommand: action=$action, medId=$medId, medName=$medName, snoozeMinutes=$snoozeMinutes, soundUri=$soundUriStr")
 
         if (action == ACTION_TAKE || action == ACTION_SKIP || action == ACTION_DISMISS ||
             action == ACTION_TAKE_ALL || action == ACTION_DISMISS_ALL) {
@@ -113,7 +112,7 @@ class MedicationAlarmService : Service() {
         // Standard alarm trigger
         // Persistent Alarm: ensure sound & vibration are running if already alive
         if (mediaPlayer == null || mediaPlayer?.isPlaying == false) {
-            startAlarmSound()
+            startAlarmSound(soundUriStr)
         }
         startVibration()
 
@@ -125,7 +124,7 @@ class MedicationAlarmService : Service() {
         return START_STICKY
     }
 
-    private fun startAlarmSound() {
+    private fun startAlarmSound(customUriString: String? = null) {
         try {
             mediaPlayer?.release()
         } catch (e: Exception) {
@@ -133,7 +132,10 @@ class MedicationAlarmService : Service() {
         }
         mediaPlayer = null
 
-        val uris = listOf(
+        val customUri = if (!customUriString.isNullOrEmpty()) android.net.Uri.parse(customUriString) else null
+
+        val uris = listOfNotNull(
+            customUri,
             RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
             RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
             RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
@@ -306,7 +308,7 @@ class MedicationAlarmService : Service() {
             val snoozeIntent = Intent(this, MedicationAlarmService::class.java).apply {
                 action = ACTION_DISMISS
                 putExtra("MED_ID", rem.medId)
-                putExtra("SNOOZE_MINUTES", 5)
+                putExtra("SNOOZE_MINUTES", 30)
             }
             val snoozePendingIntent = PendingIntent.getService(
                 this,
@@ -315,9 +317,21 @@ class MedicationAlarmService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
+            val dismissIntent = Intent(this, MedicationAlarmService::class.java).apply {
+                action = ACTION_DISMISS
+                putExtra("MED_ID", rem.medId)
+                putExtra("SNOOZE_MINUTES", 5)
+            }
+            val dismissPendingIntent = PendingIntent.getService(
+                this,
+                rem.medId.toInt() * 100 + 3,
+                dismissIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
             builder.addAction(android.R.drawable.checkbox_on_background, takenLabel, takePendingIntent)
             builder.addAction(android.R.drawable.ic_lock_idle_alarm, getString(R.string.notification_action_snooze), snoozePendingIntent)
-            builder.setDeleteIntent(snoozePendingIntent)
+            builder.setDeleteIntent(dismissPendingIntent)
         } else {
             // Find all unique profile names for the active reminders
             val profileNames = list.map { rem ->
@@ -350,7 +364,7 @@ class MedicationAlarmService : Service() {
 
             val snoozeAllIntent = Intent(this, MedicationAlarmService::class.java).apply {
                 action = ACTION_DISMISS_ALL
-                putExtra("SNOOZE_MINUTES", 5)
+                putExtra("SNOOZE_MINUTES", 30)
             }
             val snoozeAllPendingIntent = PendingIntent.getService(
                 this,
@@ -359,9 +373,20 @@ class MedicationAlarmService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
+            val dismissAllIntent = Intent(this, MedicationAlarmService::class.java).apply {
+                action = ACTION_DISMISS_ALL
+                putExtra("SNOOZE_MINUTES", 5)
+            }
+            val dismissAllPendingIntent = PendingIntent.getService(
+                this,
+                8891,
+                dismissAllIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
             builder.addAction(android.R.drawable.checkbox_on_background, "$takenLabel All", takeAllPendingIntent)
             builder.addAction(android.R.drawable.ic_lock_idle_alarm, getString(R.string.notification_action_snooze_all), snoozeAllPendingIntent)
-            builder.setDeleteIntent(snoozeAllPendingIntent)
+            builder.setDeleteIntent(dismissAllPendingIntent)
         }
 
         val notification = builder.build()

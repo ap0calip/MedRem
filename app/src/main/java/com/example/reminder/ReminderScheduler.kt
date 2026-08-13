@@ -172,6 +172,7 @@ object ReminderScheduler {
             putExtra("MED_DOSAGE", medication.dosage)
             putExtra("MED_INSTRUCTIONS", medication.instructions)
             putExtra("FAMILY_MEMBER_ID", medication.familyMemberId)
+            putExtra("SOUND_URI", medication.soundUri)
         }
 
         // We use the medication ID as requestCode to keep distinct alarms
@@ -251,6 +252,7 @@ object ReminderScheduler {
             putExtra("MED_DOSAGE", medication.dosage)
             putExtra("MED_INSTRUCTIONS", medication.instructions)
             putExtra("FAMILY_MEMBER_ID", medication.familyMemberId)
+            putExtra("SOUND_URI", medication.soundUri)
         }
         val pendingIntent = PendingIntent.getBroadcast(
             context,

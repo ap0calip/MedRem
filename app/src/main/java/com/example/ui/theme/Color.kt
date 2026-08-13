@@ -2,19 +2,19 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// Light Colors
-val MedRemPrimary = Color(0xFFD32F2F)       // Classic Medical Red
-val MedRemSecondary = Color(0xFFEF5350)     // Soft Coral Crimson
-val MedRemTertiary = Color(0xFF3F51B5)      // Classic Slate Blue
+// Vibrant Blue Theme Colors (Matching user preference & screenshot)
 
-val LightBackground = Color(0xFFF9F9F9)      // Soft clean gray-white
-val LightSurface = Color(0xFFFFFFFF)
-val MedRemPrimaryDark = Color(0xFFB71C1C)
+// Light Theme
+val MedRemPrimary = Color(0xFF2563EB)       // Vibrant Royal Blue
+val MedRemSecondary = Color(0xFF3B82F6)     // Accent Blue
+val MedRemTertiary = Color(0xFF1D4ED8)      // Deep Blue
+val LightBackground = Color(0xFFF8FAFC)     // Soft Clean Slate Light
+val LightSurface = Color(0xFFFFFFFF)        // Clean White Surface
 
-// Dark Colors
-val MedRemDarkPrimary = Color(0xFFFF8A80)   // Bright Pastel red
-val MedRemDarkSecondary = Color(0xFFFFAB91) // Bright Pastel orange-red
-val MedRemDarkTertiary = Color(0xFF7986CB)
+// Dark Theme (Vibrant Blue on Dark Canvas)
+val MedRemDarkPrimary = Color(0xFF3B82F6)   // Vibrant Blue (Matches FAB, Taken, Titles)
+val MedRemDarkSecondary = Color(0xFF60A5FA) // Light Accent Blue
+val MedRemDarkTertiary = Color(0xFF93C5FD)  // Soft Sky Blue
+val DarkBackground = Color(0xFF090D16)      // Sleek AMOLED Dark Background
+val DarkSurface = Color(0xFF111827)         // Dark Slate Card Surface
 
-val DarkBackground = Color(0xFF121212)       // Rich AMOLED black/dark
-val DarkSurface = Color(0xFF1E1E1E)          // Card slate surface

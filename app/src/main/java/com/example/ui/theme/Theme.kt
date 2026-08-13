@@ -14,34 +14,46 @@ import androidx.compose.ui.platform.LocalContext
 private val DarkColorScheme =
   darkColorScheme(
     primary = MedRemDarkPrimary,
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFF1E3A8A),
+    onPrimaryContainer = Color(0xFFDBEAFE),
     secondary = MedRemDarkSecondary,
+    onSecondary = Color.Black,
+    secondaryContainer = Color(0xFF1E293B),
+    onSecondaryContainer = Color(0xFFE2E8F0),
     tertiary = MedRemDarkTertiary,
     background = DarkBackground,
+    onBackground = Color(0xFFF1F5F9),
     surface = DarkSurface,
-    onPrimary = Color(0xFF5D0000),
-    onSecondary = Color(0xFF5D1100),
-    onBackground = Color(0xFFE0E0E0),
-    onSurface = Color(0xFFE0E0E0)
+    onSurface = Color(0xFFF1F5F9),
+    surfaceVariant = Color(0xFF1F2937),
+    onSurfaceVariant = Color(0xFF9CA3AF),
+    outline = Color(0xFF374151)
   )
 
 private val LightColorScheme =
   lightColorScheme(
     primary = MedRemPrimary,
+    onPrimary = Color.White,
+    primaryContainer = Color(0xFFDBEAFE),
+    onPrimaryContainer = Color(0xFF1E40AF),
     secondary = MedRemSecondary,
+    onSecondary = Color.White,
     tertiary = MedRemTertiary,
     background = LightBackground,
+    onBackground = Color(0xFF0F172A),
     surface = LightSurface,
-    onPrimary = Color.White,
-    onSecondary = Color.White,
-    onBackground = Color(0xFF212121),
-    onSurface = Color(0xFF212121)
+    onSurface = Color(0xFF0F172A),
+    surfaceVariant = Color(0xFFF1F5F9),
+    onSurfaceVariant = Color(0xFF475569),
+    outline = Color(0xFFCBD5E1)
   )
 
 @Composable
 fun MyApplicationTheme(
   darkTheme: Boolean = isSystemInDarkTheme(),
-  // Dynamic color is available on Android 12+
-  dynamicColor: Boolean = true,
+  // Dynamic color disabled to maintain custom app branding
+  dynamicColor: Boolean = false,
   content: @Composable () -> Unit,
 ) {
   val colorScheme =

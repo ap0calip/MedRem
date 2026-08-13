@@ -66,7 +66,7 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
 
     fun setLabelMode(mode: String) {
         labelMode.value = mode
-        prefs.edit().putString("label_mode", mode).apply()
+        prefs.edit().putString("label_mode", mode).commit()
     }
 
     fun setCustomLabels(
@@ -94,71 +94,86 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
             .putString("custom_dosage_sing", dosageSing)
             .putString("custom_dosage_plur", dosagePlur)
             .putString("custom_taken_label", takenLabel)
-            .apply()
+            .putString("label_mode", "CUSTOM")
+            .commit()
+    }
+
+    private fun calcProfileSing(mode: String, custom: String): String = when (mode) {
+        "MEDICATION" -> "Profile"
+        "ITEM" -> "Category"
+        "CUSTOM" -> custom
+        else -> "Category"
+    }
+
+    private fun calcProfilePlur(mode: String, custom: String): String = when (mode) {
+        "MEDICATION" -> "Profiles"
+        "ITEM" -> "Categories"
+        "CUSTOM" -> custom
+        else -> "Categories"
+    }
+
+    private fun calcMedicationSing(mode: String, custom: String): String = when (mode) {
+        "MEDICATION" -> "Medication"
+        "ITEM" -> "Item"
+        "CUSTOM" -> custom
+        else -> "Item"
+    }
+
+    private fun calcMedicationPlur(mode: String, custom: String): String = when (mode) {
+        "MEDICATION" -> "Medications"
+        "ITEM" -> "Items"
+        "CUSTOM" -> custom
+        else -> "Items"
+    }
+
+    private fun calcDosageSing(mode: String, custom: String): String = when (mode) {
+        "MEDICATION" -> "Dosage"
+        "ITEM" -> "Description"
+        "CUSTOM" -> custom
+        else -> "Description"
+    }
+
+    private fun calcDosagePlur(mode: String, custom: String): String = when (mode) {
+        "MEDICATION" -> "Dosages"
+        "ITEM" -> "Descriptions"
+        "CUSTOM" -> custom
+        else -> "Descriptions"
+    }
+
+    private fun calcTakenLabel(mode: String, custom: String): String = when (mode) {
+        "MEDICATION" -> "Taken"
+        "ITEM" -> "Completed"
+        "CUSTOM" -> custom
+        else -> "Completed"
     }
 
     val currentProfileSing: StateFlow<String> = combine(labelMode, customProfileSing) { mode, custom ->
-        when (mode) {
-            "MEDICATION" -> "Profile"
-            "ITEM" -> "Category"
-            "CUSTOM" -> custom
-            else -> "Profile"
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Category")
+        calcProfileSing(mode, custom)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, calcProfileSing(labelMode.value, customProfileSing.value))
 
     val currentProfilePlur: StateFlow<String> = combine(labelMode, customProfilePlur) { mode, custom ->
-        when (mode) {
-            "MEDICATION" -> "Profiles"
-            "ITEM" -> "Categories"
-            "CUSTOM" -> custom
-            else -> "Profiles"
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Categories")
+        calcProfilePlur(mode, custom)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, calcProfilePlur(labelMode.value, customProfilePlur.value))
 
     val currentMedicationSing: StateFlow<String> = combine(labelMode, customMedicationSing) { mode, custom ->
-        when (mode) {
-            "MEDICATION" -> "Medication"
-            "ITEM" -> "Item"
-            "CUSTOM" -> custom
-            else -> "Medication"
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Item")
+        calcMedicationSing(mode, custom)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, calcMedicationSing(labelMode.value, customMedicationSing.value))
 
     val currentMedicationPlur: StateFlow<String> = combine(labelMode, customMedicationPlur) { mode, custom ->
-        when (mode) {
-            "MEDICATION" -> "Medications"
-            "ITEM" -> "Items"
-            "CUSTOM" -> custom
-            else -> "Medications"
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Items")
+        calcMedicationPlur(mode, custom)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, calcMedicationPlur(labelMode.value, customMedicationPlur.value))
 
     val currentDosageSing: StateFlow<String> = combine(labelMode, customDosageSing) { mode, custom ->
-        when (mode) {
-            "MEDICATION" -> "Dosage"
-            "ITEM" -> "Description"
-            "CUSTOM" -> custom
-            else -> "Dosage"
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Description")
+        calcDosageSing(mode, custom)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, calcDosageSing(labelMode.value, customDosageSing.value))
 
     val currentDosagePlur: StateFlow<String> = combine(labelMode, customDosagePlur) { mode, custom ->
-        when (mode) {
-            "MEDICATION" -> "Dosages"
-            "ITEM" -> "Descriptions"
-            "CUSTOM" -> custom
-            else -> "Dosages"
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Descriptions")
+        calcDosagePlur(mode, custom)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, calcDosagePlur(labelMode.value, customDosagePlur.value))
 
     val currentTakenLabel: StateFlow<String> = combine(labelMode, customTakenLabel) { mode, custom ->
-        when (mode) {
-            "MEDICATION" -> "Taken"
-            "ITEM" -> "Completed"
-            "CUSTOM" -> custom
-            else -> "Taken"
-        }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "Completed")
+        calcTakenLabel(mode, custom)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, calcTakenLabel(labelMode.value, customTakenLabel.value))
 
     // --- State Sources ---
     val familyMembers: StateFlow<List<FamilyMember>> = repository.familyMembersFlow
@@ -195,6 +210,7 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
         medications.filter { med ->
             val matchesProfile = (selectedId == 0L || med.familyMemberId == selectedId)
             val matchesSearch = query.isEmpty() || med.name.contains(query, ignoreCase = true) ||
+                    med.dosage.contains(query, ignoreCase = true) ||
                     med.instructions.contains(query, ignoreCase = true)
             matchesProfile && matchesSearch
         }
@@ -213,10 +229,10 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
         searchQuery.value = query
     }
 
-    fun addOrUpdateFamilyMember(id: Long = 0L, name: String, colorHex: String, isMe: Boolean = false) {
+    fun addOrUpdateFamilyMember(id: Long = 0L, name: String, colorHex: String, soundUri: String, isMe: Boolean = false) {
         viewModelScope.launch {
             if (name.isNotBlank()) {
-                val member = FamilyMember(id = id, name = name.trim(), colorHex = colorHex, isMe = isMe)
+                val member = FamilyMember(id = id, name = name.trim(), colorHex = colorHex, soundUri = soundUri, isMe = isMe)
                 if (id == 0L) {
                     repository.insertFamilyMember(member)
                 } else {
@@ -228,10 +244,13 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
 
     fun deleteFamilyMember(familyMember: FamilyMember) {
         viewModelScope.launch {
+            if (familyMembers.value.size <= 1) return@launch
             val meds = allMedications.value.filter { it.familyMemberId == familyMember.id }
             meds.forEach { med ->
                 ReminderScheduler.cancelAlarm(getApplication(), med)
+                repository.deleteDoseRecordsByMedicationId(med.id)
             }
+            repository.deleteDoseRecordsByFamilyMemberName(familyMember.name)
             repository.deleteFamilyMember(familyMember)
             if (selectedFamilyMemberId.value == familyMember.id) {
                 selectedFamilyMemberId.value = 0L
@@ -252,7 +271,8 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
         familyMemberId: Long,
         isActive: Boolean = true,
         snoozedUntil: Long = 0L,
-        autoReset: Boolean = false
+        autoReset: Boolean = false,
+        soundUri: String
     ) {
         viewModelScope.launch {
             var lastLogged = 0L
@@ -276,7 +296,8 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                 isActive = isActive,
                 snoozedUntil = snoozedUntil,
                 lastLoggedTime = lastLogged,
-                autoReset = autoReset
+                autoReset = autoReset,
+                soundUri = soundUri
             )
 
             val newId = repository.insertMedication(med)
@@ -384,6 +405,7 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                     put("id", member.id)
                     put("name", member.name)
                     put("colorHex", member.colorHex)
+                    put("soundUri", member.soundUri)
                     put("isMe", member.isMe)
                 }
                 profilesArr.put(mObj)
@@ -404,12 +426,24 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                     put("isActive", med.isActive)
                     put("snoozedUntil", med.snoozedUntil)
                     put("lastLoggedTime", med.lastLoggedTime)
+                    put("soundUri", med.soundUri)
                 }
                 medsArr.put(medObj)
             }
 
             rootObj.put("profiles", profilesArr)
             rootObj.put("medications", medsArr)
+            rootObj.put("label_mode", labelMode.value)
+            val customLabelsObj = JSONObject().apply {
+                put("profile_sing", customProfileSing.value)
+                put("profile_plur", customProfilePlur.value)
+                put("med_sing", customMedicationSing.value)
+                put("med_plur", customMedicationPlur.value)
+                put("dosage_sing", customDosageSing.value)
+                put("dosage_plur", customDosagePlur.value)
+                put("taken_label", customTakenLabel.value)
+            }
+            rootObj.put("custom_labels", customLabelsObj)
             return rootObj.toString(2)
         } catch (e: Exception) {
             Log.e("MedicationViewModel", "Failed to export JSON: ${e.message}", e)
@@ -426,6 +460,23 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                 }
 
                 val rootObj = JSONObject(jsonStr)
+                if (rootObj.has("label_mode")) {
+                    val mode = rootObj.getString("label_mode")
+                    val customObj = rootObj.optJSONObject("custom_labels")
+                    if (customObj != null) {
+                        setCustomLabels(
+                            customObj.optString("profile_sing", "Profile"),
+                            customObj.optString("profile_plur", "Profiles"),
+                            customObj.optString("med_sing", "Medication"),
+                            customObj.optString("med_plur", "Medications"),
+                            customObj.optString("dosage_sing", "Dosage"),
+                            customObj.optString("dosage_plur", "Dosages"),
+                            customObj.optString("taken_label", "Taken")
+                        )
+                    }
+                    setLabelMode(mode)
+                }
+
                 val profilesArr = rootObj.optJSONArray("profiles") ?: JSONArray()
                 val medsArr = rootObj.optJSONArray("medications") ?: JSONArray()
 
@@ -440,6 +491,7 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                     val origId = mObj.getLong("id")
                     val name = mObj.getString("name").trim()
                     val colorHex = mObj.optString("colorHex", "#2196F3")
+                    val soundUri = mObj.optString("soundUri", "")
                     val isMe = mObj.optBoolean("isMe", false)
 
                     // Check if already exists by name
@@ -447,7 +499,7 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                     if (existing != null) {
                         profileIdMap[origId] = existing.id
                     } else {
-                        val newMember = FamilyMember(name = name, colorHex = colorHex, isMe = isMe)
+                        val newMember = FamilyMember(name = name, colorHex = colorHex, soundUri = soundUri, isMe = isMe)
                         val newId = repository.insertFamilyMember(newMember)
                         profileIdMap[origId] = newId
                         importedProfiles++
@@ -472,6 +524,7 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                     val isActive = medObj.optBoolean("isActive", true)
                     val snoozedUntil = medObj.optLong("snoozedUntil", 0L)
                     val lastLoggedTime = medObj.optLong("lastLoggedTime", 0L)
+                    val soundUri = medObj.optString("soundUri", "")
 
                     val mappedFamilyMemberId = profileIdMap[origFamilyMemberId] ?: defaultFamilyId
 
@@ -497,7 +550,8 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                             familyMemberId = mappedFamilyMemberId,
                             isActive = isActive,
                             snoozedUntil = snoozedUntil,
-                            lastLoggedTime = lastLoggedTime
+                            lastLoggedTime = lastLoggedTime,
+                            soundUri = soundUri
                         )
                         val newMedId = repository.insertMedication(medInstance)
                         val insertedMed = medInstance.copy(id = newMedId)
