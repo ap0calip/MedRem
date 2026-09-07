@@ -366,13 +366,16 @@ fun SingleAlarmLayout(
         withContext(Dispatchers.IO) {
             try {
                 val db = AppDatabase.getDatabase(context)
-                val member = if (reminder.familyMemberId != -1L) db.dao().getFamilyMemberById(reminder.familyMemberId) else null
                 val med = if (reminder.medId != -1L) db.dao().getMedicationById(reminder.medId) else null
-                if (member != null) {
-                    familyMemberName = member.name
-                    familyMemberColorHex = member.colorHex
+                val targetMemberId = if (reminder.familyMemberId != -1L) reminder.familyMemberId else (med?.familyMemberId ?: -1L)
+                db.dao().getAllFamilyMembersFlow().collect { members ->
+                    val member = if (targetMemberId != -1L) members.find { it.id == targetMemberId } else null
+                    if (member != null) {
+                        familyMemberName = member.name
+                        familyMemberColorHex = member.colorHex
+                    }
+                    soundName = com.example.SoundUtils.getSoundName(context, med?.soundUri, member?.soundUri)
                 }
-                soundName = com.example.SoundUtils.getSoundName(context, med?.soundUri, member?.soundUri)
             } catch (e: Exception) {
                 Log.e("AlarmActivity", "Failed to fetch family member detail: ${e.message}")
             }
@@ -613,13 +616,16 @@ fun MultiAlarmCard(
         withContext(Dispatchers.IO) {
             try {
                 val db = AppDatabase.getDatabase(context)
-                val member = if (reminder.familyMemberId != -1L) db.dao().getFamilyMemberById(reminder.familyMemberId) else null
                 val med = if (reminder.medId != -1L) db.dao().getMedicationById(reminder.medId) else null
-                if (member != null) {
-                    familyMemberName = member.name
-                    familyMemberColorHex = member.colorHex
+                val targetMemberId = if (reminder.familyMemberId != -1L) reminder.familyMemberId else (med?.familyMemberId ?: -1L)
+                db.dao().getAllFamilyMembersFlow().collect { members ->
+                    val member = if (targetMemberId != -1L) members.find { it.id == targetMemberId } else null
+                    if (member != null) {
+                        familyMemberName = member.name
+                        familyMemberColorHex = member.colorHex
+                    }
+                    soundName = com.example.SoundUtils.getSoundName(context, med?.soundUri, member?.soundUri)
                 }
-                soundName = com.example.SoundUtils.getSoundName(context, med?.soundUri, member?.soundUri)
             } catch (e: Exception) {}
         }
     }

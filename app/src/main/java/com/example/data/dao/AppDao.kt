@@ -44,6 +44,9 @@ interface AppDao {
     @Delete
     suspend fun deleteMedication(medication: Medication)
 
+    @Query("UPDATE medications SET deleteAfterCompletion = 0 WHERE scheduleType != 'ONE_TIME'")
+    suspend fun sanitizeRecurringDeleteAfterCompletion()
+
     // --- Dose Records ---
     @Query("SELECT * FROM dose_records ORDER BY actualTime DESC")
     fun getAllDoseRecordsFlow(): Flow<List<DoseRecord>>
@@ -59,4 +62,16 @@ interface AppDao {
 
     @Query("DELETE FROM dose_records WHERE familyMemberName = :familyMemberName")
     suspend fun deleteDoseRecordsByFamilyMemberName(familyMemberName: String)
+
+    @Query("DELETE FROM dose_records")
+    suspend fun deleteAllDoseRecords()
+
+    @Query("DELETE FROM dose_records WHERE medicationName = :medicationName")
+    suspend fun deleteDoseRecordsByMedicationName(medicationName: String)
+
+    @Query("DELETE FROM dose_records WHERE actualTime < :timestamp")
+    suspend fun deleteDoseRecordsOlderThan(timestamp: Long)
+
+    @Query("DELETE FROM dose_records WHERE status = :status")
+    suspend fun deleteDoseRecordsByStatus(status: String)
 }

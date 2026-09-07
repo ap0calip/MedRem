@@ -19,6 +19,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
@@ -45,6 +46,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -71,8 +75,40 @@ import com.example.viewmodel.MedicationViewModel
 import com.example.ui.SnoozeDurationDialog
 import java.text.SimpleDateFormat
 import java.util.*
+import kotlinx.coroutines.launch
 
 val LocalTextScaleFactor = compositionLocalOf { 1f }
+
+fun openPlayStoreForReview(context: Context) {
+    val packageName = context.packageName
+    val uri = Uri.parse("market://details?id=$packageName")
+    val goToMarket = Intent(Intent.ACTION_VIEW, uri).apply {
+        addFlags(
+            Intent.FLAG_ACTIVITY_NO_HISTORY or
+            Intent.FLAG_ACTIVITY_NEW_DOCUMENT or
+            Intent.FLAG_ACTIVITY_MULTIPLE_TASK
+        )
+    }
+    try {
+        context.startActivity(goToMarket)
+    } catch (e: Exception) {
+        val webIntent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("https://play.google.com/store/apps/details?id=$packageName")
+        ).apply {
+            addFlags(
+                Intent.FLAG_ACTIVITY_NO_HISTORY or
+                Intent.FLAG_ACTIVITY_NEW_DOCUMENT or
+                Intent.FLAG_ACTIVITY_MULTIPLE_TASK
+            )
+        }
+        try {
+            context.startActivity(webIntent)
+        } catch (e2: Exception) {
+            Toast.makeText(context, "Unable to open Google Play Store", Toast.LENGTH_SHORT).show()
+        }
+    }
+}
 
 @Composable
 fun ProvideTextScale(content: @Composable () -> Unit) {
@@ -263,7 +299,8 @@ fun MedRemAppContent(
     val dosagePlur by viewModel.currentDosagePlur.collectAsState()
     val takenLabel by viewModel.currentTakenLabel.collectAsState()
     
-    var showCustomLabelsDialog by rememberSaveable { mutableStateOf(false) }
+    var showEditLabelsDialog by rememberSaveable { mutableStateOf(false) }
+    var showTextSizeDialog by rememberSaveable { mutableStateOf(false) }
     
     // Filter variables
     val selectedProfileId by viewModel.selectedFamilyMemberId.collectAsState()
@@ -273,6 +310,9 @@ fun MedRemAppContent(
     var showAddMedicationDialog by rememberSaveable { mutableStateOf(false) }
     var showAddProfileDialog by rememberSaveable { mutableStateOf(false) }
     var showDataTransferDialog by rememberSaveable { mutableStateOf(false) }
+    var showSchedulingConfigDialog by rememberSaveable { mutableStateOf(false) }
+    var showClearHistoryDialog by rememberSaveable { mutableStateOf(false) }
+    var showAboutDialog by rememberSaveable { mutableStateOf(false) }
     var medicationToEdit by remember { mutableStateOf<Medication?>(null) }
     
     // Active navigation tab (0 = Medications, 1 = Dose History)
@@ -354,39 +394,6 @@ fun MedRemAppContent(
                         )
                         HorizontalDivider()
                         DropdownMenuItem(
-                            text = { Text("Labels", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) },
-                            onClick = { /* Just a header */ },
-                            enabled = false
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Medication (Profile, Med, Dosage)") },
-                            leadingIcon = { Icon(Icons.Default.MedicalServices, contentDescription = null) },
-                            modifier = Modifier.padding(start = 16.dp),
-                            onClick = {
-                                viewModel.setLabelMode("MEDICATION")
-                                showMenu = false
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Item (Category, Item, Description)") },
-                            leadingIcon = { Icon(Icons.Default.Category, contentDescription = null) },
-                            modifier = Modifier.padding(start = 16.dp),
-                            onClick = {
-                                viewModel.setLabelMode("ITEM")
-                                showMenu = false
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Custom Labels") },
-                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                            modifier = Modifier.padding(start = 16.dp),
-                            onClick = {
-                                showCustomLabelsDialog = true
-                                showMenu = false
-                            }
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
                             text = { Text("Backup & Restore") },
                             leadingIcon = { Icon(Icons.Default.ImportExport, contentDescription = null) },
                             onClick = {
@@ -396,27 +403,49 @@ fun MedRemAppContent(
                         )
                         HorizontalDivider()
                         DropdownMenuItem(
-                            text = { Text("Text Size (${Math.round(textScaleFactor * 100)}%)", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) },
-                            leadingIcon = { Icon(Icons.Default.TextFields, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                            onClick = { /* Section Header */ },
-                            enabled = false
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Decrease") },
-                            leadingIcon = { Icon(Icons.Default.ZoomOut, contentDescription = null) },
-                            modifier = Modifier.padding(start = 16.dp),
+                            text = { Text("Clear History") },
+                            leadingIcon = { Icon(Icons.Default.DeleteSweep, contentDescription = null) },
                             onClick = {
-                                val nextScale = maxOf(0.5f, kotlin.math.round((textScaleFactor - 0.1f) * 10f) / 10f)
-                                onTextScaleChange(nextScale)
+                                showClearHistoryDialog = true
+                                showMenu = false
                             }
                         )
+                        HorizontalDivider()
                         DropdownMenuItem(
-                            text = { Text("Increase") },
-                            leadingIcon = { Icon(Icons.Default.ZoomIn, contentDescription = null) },
-                            modifier = Modifier.padding(start = 16.dp),
+                            text = { Text("Edit Labels") },
+                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
                             onClick = {
-                                val nextScale = minOf(2.0f, kotlin.math.round((textScaleFactor + 0.1f) * 10f) / 10f)
-                                onTextScaleChange(nextScale)
+                                showEditLabelsDialog = true
+                                showMenu = false
+                            }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("New Schedule") },
+                            leadingIcon = { Icon(Icons.Default.EventNote, contentDescription = null) },
+                            onClick = {
+                                medicationToEdit = null
+                                showAddMedicationDialog = true
+                                showMenu = false
+                            }
+                        )
+                        HorizontalDivider()
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Settings") },
+                            leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                            onClick = {
+                                showSchedulingConfigDialog = true
+                                showMenu = false
+                            }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text("Text Size") },
+                            leadingIcon = { Icon(Icons.Default.TextFields, contentDescription = null) },
+                            onClick = {
+                                showTextSizeDialog = true
+                                showMenu = false
                             }
                         )
                         HorizontalDivider()
@@ -425,6 +454,16 @@ fun MedRemAppContent(
                             leadingIcon = { Icon(Icons.Default.Help, contentDescription = null) },
                             onClick = {
                                 tutorialStepIndex = 0
+                                showMenu = false
+                            }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.menu_about)) },
+                            leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
+                            modifier = Modifier.testTag("menu_about"),
+                            onClick = {
+                                showAboutDialog = true
                                 showMenu = false
                             }
                         )
@@ -538,7 +577,7 @@ fun MedRemAppContent(
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { viewModel.setSearchQuery(it) },
-                placeholder = { Text("Search ${medicationSing.lowercase()} or ${dosageSing.lowercase()}...", fontSize = 14.sp) },
+                placeholder = { Text("Search", fontSize = 14.sp) },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search_icon_desc)) },
                 trailingIcon = if (searchQuery.isNotEmpty()) {
                     {
@@ -624,27 +663,14 @@ fun MedRemAppContent(
                 if (activeTab == 0) {
                     // Schedules list
                     if (filteredMedications.isEmpty()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState()),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.SpaceBetween
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier.weight(1f),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                EmptyStateView(
-                                    icon = Icons.Default.HealthAndSafety,
-                                    title = "No active reminders",
-                                    description = if (searchQuery.isNotEmpty()) "No results match your search." else "Tap the '+' floating button to set up your first weekly or interval ${medicationSing.lowercase()} reminder."
-                                )
-                            }
-                            DeveloperInfoCard(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 16.dp, end = 16.dp, bottom = 88.dp, top = 16.dp)
+                            EmptyStateView(
+                                icon = Icons.Default.HealthAndSafety,
+                                title = "No active reminders",
+                                description = if (searchQuery.isNotEmpty()) "No results match your search." else "Tap the '+' floating button to set up your first weekly or interval ${medicationSing.lowercase()} reminder."
                             )
                         }
                     } else {
@@ -661,8 +687,8 @@ fun MedRemAppContent(
 
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 88.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 88.dp, top = 8.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             if (snoozedMeds.isNotEmpty()) {
                                 item {
@@ -670,7 +696,7 @@ fun MedRemAppContent(
                                         text = "Snoozed $medicationPlur",
                                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
                                     )
                                 }
                                 items(snoozedMeds, key = { "snoozed_${it.id}" }) { medication ->
@@ -716,7 +742,7 @@ fun MedRemAppContent(
                                         text = "Next $medicationPlur",
                                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                         color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp)
+                                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
                                     )
                                 }
                                 items(sortedNextMeds, key = { "next_${it.id}" }) { medication ->
@@ -755,15 +781,6 @@ fun MedRemAppContent(
                                     )
                                 }
                             }
-
-                            // Moving DeveloperInfoCard here below Next Medication card
-                            item {
-                                DeveloperInfoCard(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 16.dp, bottom = 16.dp)
-                                )
-                            }
                         }
                     }
                 } else {
@@ -786,33 +803,20 @@ fun MedRemAppContent(
                     }
 
                     if (filteredRecords.isEmpty()) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .verticalScroll(rememberScrollState()),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.SpaceBetween
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier.weight(1f),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                EmptyStateView(
-                                    icon = Icons.Default.Timeline,
-                                    title = "No history recorded",
-                                    description = "No ${takenLabel.lowercase()} or skipped yet for the selected ${profileSing.lowercase()}."
-                                )
-                            }
-                            DeveloperInfoCard(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 16.dp, end = 16.dp, bottom = 88.dp, top = 16.dp)
+                            EmptyStateView(
+                                icon = Icons.Default.Timeline,
+                                title = "No history recorded",
+                                description = "No ${takenLabel.lowercase()} or skipped yet for the selected ${profileSing.lowercase()}."
                             )
                         }
                     } else {
                         LazyColumn(
                             modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 88.dp),
+                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 88.dp, top = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             items(filteredRecords, key = { it.id }) { record ->
@@ -826,15 +830,6 @@ fun MedRemAppContent(
                                     member = member,
                                     takenLabel = takenLabel,
                                     onDeleteHistory = { viewModel.deleteDoseRecord(record.id) }
-                                )
-                            }
-
-                            // Moving DeveloperInfoCard here below Dose History logs
-                            item {
-                                DeveloperInfoCard(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 16.dp, bottom = 16.dp)
                                 )
                             }
                         }
@@ -902,39 +897,6 @@ fun MedRemAppContent(
                                 )
                                 HorizontalDivider()
                                 DropdownMenuItem(
-                                    text = { Text("Labels", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) },
-                                    onClick = { /* Just a header */ },
-                                    enabled = false
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Medication (Profile, Med, Dosage)") },
-                                    leadingIcon = { Icon(Icons.Default.MedicalServices, contentDescription = null) },
-                                    modifier = Modifier.padding(start = 16.dp),
-                                    onClick = {
-                                        viewModel.setLabelMode("MEDICATION")
-                                        showMenu = false
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Item (Category, Item, Description)") },
-                                    leadingIcon = { Icon(Icons.Default.Category, contentDescription = null) },
-                                    modifier = Modifier.padding(start = 16.dp),
-                                    onClick = {
-                                        viewModel.setLabelMode("ITEM")
-                                        showMenu = false
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Custom Labels") },
-                                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                                    modifier = Modifier.padding(start = 16.dp),
-                                    onClick = {
-                                        showCustomLabelsDialog = true
-                                        showMenu = false
-                                    }
-                                )
-                                HorizontalDivider()
-                                DropdownMenuItem(
                                     text = { Text("Backup & Restore") },
                                     leadingIcon = { Icon(Icons.Default.ImportExport, contentDescription = null) },
                                     onClick = {
@@ -944,27 +906,49 @@ fun MedRemAppContent(
                                 )
                                 HorizontalDivider()
                                 DropdownMenuItem(
-                                    text = { Text("Text Size (${Math.round(textScaleFactor * 100)}%)", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary) },
-                                    leadingIcon = { Icon(Icons.Default.TextFields, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-                                    onClick = { /* Section Header */ },
-                                    enabled = false
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Decrease") },
-                                    leadingIcon = { Icon(Icons.Default.ZoomOut, contentDescription = null) },
-                                    modifier = Modifier.padding(start = 16.dp),
+                                    text = { Text("Clear History") },
+                                    leadingIcon = { Icon(Icons.Default.DeleteSweep, contentDescription = null) },
                                     onClick = {
-                                        val nextScale = maxOf(0.5f, kotlin.math.round((textScaleFactor - 0.1f) * 10f) / 10f)
-                                        onTextScaleChange(nextScale)
+                                        showClearHistoryDialog = true
+                                        showMenu = false
                                     }
                                 )
+                                HorizontalDivider()
                                 DropdownMenuItem(
-                                    text = { Text("Increase") },
-                                    leadingIcon = { Icon(Icons.Default.ZoomIn, contentDescription = null) },
-                                    modifier = Modifier.padding(start = 16.dp),
+                                    text = { Text("Edit Labels") },
+                                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
                                     onClick = {
-                                        val nextScale = minOf(2.0f, kotlin.math.round((textScaleFactor + 0.1f) * 10f) / 10f)
-                                        onTextScaleChange(nextScale)
+                                        showEditLabelsDialog = true
+                                        showMenu = false
+                                    }
+                                )
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("New Schedule") },
+                                    leadingIcon = { Icon(Icons.Default.EventNote, contentDescription = null) },
+                                    onClick = {
+                                        medicationToEdit = null
+                                        showAddMedicationDialog = true
+                                        showMenu = false
+                                    }
+                                )
+                                HorizontalDivider()
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("Settings") },
+                                    leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                    onClick = {
+                                        showSchedulingConfigDialog = true
+                                        showMenu = false
+                                    }
+                                )
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text("Text Size") },
+                                    leadingIcon = { Icon(Icons.Default.TextFields, contentDescription = null) },
+                                    onClick = {
+                                        showTextSizeDialog = true
+                                        showMenu = false
                                     }
                                 )
                                 HorizontalDivider()
@@ -973,6 +957,16 @@ fun MedRemAppContent(
                                     leadingIcon = { Icon(Icons.Default.Help, contentDescription = null) },
                                     onClick = {
                                         tutorialStepIndex = 0
+                                        showMenu = false
+                                    }
+                                )
+                                HorizontalDivider()
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.menu_about)) },
+                                    leadingIcon = { Icon(Icons.Default.Info, contentDescription = null) },
+                                    modifier = Modifier.testTag("menu_about_landscape"),
+                                    onClick = {
+                                        showAboutDialog = true
                                         showMenu = false
                                     }
                                 )
@@ -1087,7 +1081,7 @@ fun MedRemAppContent(
                         OutlinedTextField(
                             value = searchQuery,
                             onValueChange = { viewModel.setSearchQuery(it) },
-                            placeholder = { Text("Search ${medicationSing.lowercase()} or ${dosageSing.lowercase()}...", fontSize = 14.sp) },
+                            placeholder = { Text("Search", fontSize = 14.sp) },
                             leadingIcon = { Icon(Icons.Default.Search, contentDescription = stringResource(R.string.search_icon_desc)) },
                             trailingIcon = if (searchQuery.isNotEmpty()) {
                                 {
@@ -1182,13 +1176,6 @@ fun MedRemAppContent(
                                     description = if (searchQuery.isNotEmpty()) "No results match your search." else "Tap the '+' floating button to set up your first weekly or interval ${medicationSing.lowercase()} reminder."
                                 )
                             }
-                        }
-                        item {
-                            DeveloperInfoCard(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 16.dp, end = 16.dp, bottom = 88.dp, top = 16.dp)
-                            )
                         }
                     } else {
                         val now = System.currentTimeMillis()
@@ -1297,14 +1284,6 @@ fun MedRemAppContent(
                                 }
                             }
                         }
-
-                        item {
-                            DeveloperInfoCard(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 88.dp)
-                            )
-                        }
                     }
                 } else {
                     if (landscapeFilteredRecords.isEmpty()) {
@@ -1322,13 +1301,6 @@ fun MedRemAppContent(
                                 )
                             }
                         }
-                        item {
-                            DeveloperInfoCard(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 16.dp, end = 16.dp, bottom = 88.dp, top = 16.dp)
-                            )
-                        }
                     } else {
                         items(landscapeFilteredRecords, key = { "ls_hist_${it.id}" }) { record ->
                             Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
@@ -1344,14 +1316,6 @@ fun MedRemAppContent(
                                     onDeleteHistory = { viewModel.deleteDoseRecord(record.id) }
                                 )
                             }
-                        }
-
-                        item {
-                            DeveloperInfoCard(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 88.dp)
-                            )
                         }
                     }
                 }
@@ -1390,7 +1354,7 @@ fun MedRemAppContent(
                     content = "Tap this menu icon to manage ${profilePlur.lowercase()}, change label presets, or back up your schedules."
                 ),
                 TutorialStep(
-                    title = "Category Filters",
+                    title = "$profileSing Filters",
                     content = "Filter by ${profileSing.lowercase()} to quickly find your schedules and logs."
                 ),
                 TutorialStep(
@@ -1471,7 +1435,7 @@ fun MedRemAppContent(
             dosagePlur = dosagePlur,
             takenLabel = takenLabel,
             onDismiss = { showAddMedicationDialog = false },
-            onSave = { name, dosage, notes, schedType, days, hours, time, startDate, profileId, active, autoReset, soundUri ->
+            onSave = { name, dosage, notes, schedType, days, hours, time, startDate, profileId, active, autoReset, soundUri, deleteAfter, recordHist ->
                 viewModel.addOrUpdateMedication(
                     id = editingMed?.id ?: 0,
                     name = name,
@@ -1485,196 +1449,56 @@ fun MedRemAppContent(
                     familyMemberId = profileId,
                     isActive = active,
                     autoReset = autoReset,
-                    soundUri = soundUri
+                    soundUri = soundUri,
+                    deleteAfterCompletion = deleteAfter,
+                    recordInHistory = recordHist
                 )
                 showAddMedicationDialog = false
             }
         )
     }
 
-    if (showCustomLabelsDialog) {
-        var profSing by remember { mutableStateOf(profileSing) }
-        var profPlur by remember { mutableStateOf(profilePlur) }
-        var medSing by remember { mutableStateOf(medicationSing) }
-        var medPlur by remember { mutableStateOf(medicationPlur) }
-        var doseSing by remember { mutableStateOf(dosageSing) }
-        var dosePlur by remember { mutableStateOf(dosagePlur) }
-        var takeLabelVal by remember { mutableStateOf(takenLabel) }
+    if (showEditLabelsDialog) {
+        EditLabelsDialog(
+            viewModel = viewModel,
+            onDismiss = { showEditLabelsDialog = false }
+        )
+    }
 
-        val configCustomLabels = LocalConfiguration.current
-        val isCustomLabelsLandscape = configCustomLabels.orientation == Configuration.ORIENTATION_LANDSCAPE
-
-        ThemedDialog(onDismissRequest = { showCustomLabelsDialog = false }) {
-            Card(
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier
-                    .fillMaxWidth(if (isCustomLabelsLandscape) 0.55f else 0.92f)
-                    .widthIn(max = 420.dp)
-                    .padding(vertical = 12.dp)
-                    .testTag("custom_labels_dialog"),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(20.dp)
-                        .verticalScroll(rememberScrollState()),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "Customize Labels",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "Provide your own custom singular and plural terms for Items, Categories, Descriptions, and Completed actions.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    Text(
-                        text = "Categories Group",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = profSing,
-                            onValueChange = { profSing = it },
-                            label = { Text("Singular") },
-                            placeholder = { Text("e.g. Category") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = profPlur,
-                            onValueChange = { profPlur = it },
-                            label = { Text("Plural") },
-                            placeholder = { Text("e.g. Categories") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text(
-                        text = "Items Group",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = medSing,
-                            onValueChange = { medSing = it },
-                            label = { Text("Singular") },
-                            placeholder = { Text("e.g. Item") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = medPlur,
-                            onValueChange = { medPlur = it },
-                            label = { Text("Plural") },
-                            placeholder = { Text("e.g. Items") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text(
-                        text = "Descriptions Group",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = doseSing,
-                            onValueChange = { doseSing = it },
-                            label = { Text("Singular") },
-                            placeholder = { Text("e.g. Description") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = dosePlur,
-                            onValueChange = { dosePlur = it },
-                            label = { Text("Plural") },
-                            placeholder = { Text("e.g. Descriptions") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Text(
-                        text = "Action Group",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = takeLabelVal,
-                        onValueChange = { takeLabelVal = it },
-                        label = { Text("Action Label") },
-                        placeholder = { Text("e.g. Completed") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-
-                    Spacer(modifier = Modifier.height(24.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End
-                    ) {
-                        TextButton(onClick = { showCustomLabelsDialog = false }) {
-                            Text("Cancel")
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Button(
-                            onClick = {
-                                if (profSing.isNotBlank() && profPlur.isNotBlank() &&
-                                    medSing.isNotBlank() && medPlur.isNotBlank() &&
-                                    doseSing.isNotBlank() && dosePlur.isNotBlank() &&
-                                    takeLabelVal.isNotBlank()
-                                ) {
-                                    viewModel.setCustomLabels(
-                                        profSing.trim(), profPlur.trim(),
-                                        medSing.trim(), medPlur.trim(),
-                                        doseSing.trim(), dosePlur.trim(),
-                                        takeLabelVal.trim()
-                                    )
-                                    viewModel.setLabelMode("CUSTOM")
-                                    showCustomLabelsDialog = false
-                                } else {
-                                    Toast.makeText(context, "All fields are required for Custom Labels!", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        ) {
-                            Text("Apply")
-                        }
-                    }
-                }
-            }
-        }
+    if (showTextSizeDialog) {
+        TextSizeDialog(
+            currentScale = textScaleFactor,
+            onScaleChange = onTextScaleChange,
+            onDismiss = { showTextSizeDialog = false }
+        )
     }
 
     if (showDataTransferDialog) {
         DataTransferDialog(
             viewModel = viewModel,
             onDismiss = { showDataTransferDialog = false }
+        )
+    }
+
+    if (showClearHistoryDialog) {
+        ClearHistoryDialog(
+            viewModel = viewModel,
+            onDismiss = { showClearHistoryDialog = false }
+        )
+    }
+
+    if (showAboutDialog) {
+        AboutDialog(
+            onDismiss = { showAboutDialog = false }
+        )
+    }
+
+    if (showSchedulingConfigDialog) {
+        SchedulingConfigDialog(
+            sharedPref = sharedPref,
+            dosageSing = dosageSing,
+            takenLabel = takenLabel,
+            onDismiss = { showSchedulingConfigDialog = false }
         )
     }
 }
@@ -1747,6 +1571,95 @@ fun formatDateMmDdYyyy(millis: Long): String {
     return sdf.format(Date(millis))
 }
 
+data class NextAlarmInfo(
+    val triggerMillis: Long,
+    val dayText: String,
+    val timeText: String,
+    val fullDisplay: String,
+    val relativeText: String,
+    val isPastToday: Boolean
+)
+
+fun calculateNextAlarmInfo(
+    triggerMillis: Long,
+    is12Hour: Boolean = true,
+    nowMillis: Long = System.currentTimeMillis()
+): NextAlarmInfo {
+    val cal = Calendar.getInstance().apply { timeInMillis = triggerMillis }
+    val today = Calendar.getInstance().apply { timeInMillis = nowMillis }
+    val tomorrow = Calendar.getInstance().apply {
+        timeInMillis = nowMillis
+        add(Calendar.DAY_OF_YEAR, 1)
+    }
+
+    val isToday = cal.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
+            cal.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
+
+    val isTomorrow = cal.get(Calendar.YEAR) == tomorrow.get(Calendar.YEAR) &&
+            cal.get(Calendar.DAY_OF_YEAR) == tomorrow.get(Calendar.DAY_OF_YEAR)
+
+    val timeFormat = if (is12Hour) SimpleDateFormat("h:mm a", Locale.getDefault()) else SimpleDateFormat("HH:mm", Locale.getDefault())
+    val dateFormat = SimpleDateFormat("EEEE, MMM d", Locale.getDefault())
+    val fullDateFormat = SimpleDateFormat("EEEE, MMM d, yyyy", Locale.getDefault())
+
+    val timeStr = timeFormat.format(cal.time)
+    val dateStr = dateFormat.format(cal.time)
+
+    val dayText: String
+    val fullDisplay: String
+
+    if (isToday) {
+        dayText = "Today"
+        fullDisplay = "Today ($dateStr) at $timeStr"
+    } else if (isTomorrow) {
+        dayText = "Tomorrow"
+        fullDisplay = "Tomorrow ($dateStr) at $timeStr"
+    } else {
+        val daysDiff = ((cal.timeInMillis - today.timeInMillis) / (24 * 3600_000L)).toInt()
+        if (daysDiff < 7) {
+            dayText = SimpleDateFormat("EEEE", Locale.getDefault()).format(cal.time)
+            fullDisplay = "$dateStr at $timeStr"
+        } else {
+            dayText = dateStr
+            fullDisplay = "${fullDateFormat.format(cal.time)} at $timeStr"
+        }
+    }
+
+    val diffMillis = triggerMillis - nowMillis
+    val relativeText = when {
+        diffMillis <= 0L -> "Due now"
+        diffMillis < 60_000L -> "In less than a minute"
+        diffMillis < 3600_000L -> {
+            val mins = diffMillis / 60_000L
+            "In $mins ${if (mins == 1L) "minute" else "minutes"}"
+        }
+        diffMillis < 24 * 3600_000L -> {
+            val hrs = diffMillis / 3600_000L
+            val mins = (diffMillis % 3600_000L) / 60_000L
+            if (mins == 0L) "In $hrs ${if (hrs == 1L) "hour" else "hours"}"
+            else "In $hrs ${if (hrs == 1L) "hour" else "hours"} $mins min"
+        }
+        else -> {
+            val days = diffMillis / (24 * 3600_000L)
+            val hrs = (diffMillis % (24 * 3600_000L)) / 3600_000L
+            if (days == 1L && hrs == 0L) "In 1 day"
+            else if (days == 1L) "In 1 day $hrs hr"
+            else "In $days days $hrs hr"
+        }
+    }
+
+    val isPastToday = !isToday && diffMillis > 0L
+
+    return NextAlarmInfo(
+        triggerMillis = triggerMillis,
+        dayText = dayText,
+        timeText = timeStr,
+        fullDisplay = fullDisplay,
+        relativeText = relativeText,
+        isPastToday = isPastToday
+    )
+}
+
 @Composable
 fun MedicationReminderCard(
     medication: Medication,
@@ -1790,78 +1703,59 @@ fun MedicationReminderCard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp)
+                .padding(12.dp)
         ) {
-            // First row - medication name and user align left, active align to right
+            // Row 1: Profile / Category (left), Active button (right)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(
-                    modifier = Modifier.weight(1f, fill = false),
-                    verticalAlignment = Alignment.CenterVertically
+                // Family member tag badge
+                Box(
+                    modifier = Modifier
+                        .background(memberColor.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                        .border(1.dp, memberColor.copy(alpha = 0.40f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
                 ) {
                     Text(
-                        text = medication.name,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (medication.isActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        text = member?.name ?: "Unknown",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = memberColor
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    
-                    // Family member tag badge
-                    Box(
-                        modifier = Modifier
-                            .background(memberColor.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
-                            .border(1.dp, memberColor.copy(alpha = 0.40f), RoundedCornerShape(6.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    ) {
-                        Text(
-                            text = member?.name ?: "Unknown",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = memberColor
-                        )
-                    }
                 }
 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Switch(
-                        checked = medication.isActive,
-                        onCheckedChange = { onToggleActive(it) },
-                        modifier = Modifier
-                            .scale(0.8f)
-                            .testTag("med_switch_${medication.id}")
-                    )
-                }
+                Switch(
+                    checked = medication.isActive,
+                    onCheckedChange = { onToggleActive(it) },
+                    modifier = Modifier
+                        .scale(0.8f)
+                        .testTag("med_switch_${medication.id}")
+                )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
-            // Second row - Dosage align left, Edit and Delete align to right
+            // Row 2: Item / Medication Name (left), Edit and Delete button (right)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Dosage details
                 Text(
-                    text = "$dosageSing: " + medication.dosage,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
-                    modifier = Modifier.weight(1f, fill = false)
+                    text = medication.name,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (medication.isActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     IconButton(
                         onClick = onEdit,
@@ -1888,26 +1782,32 @@ fun MedicationReminderCard(
                 }
             }
 
-            // Note/Instructions
-            if (medication.instructions.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f), RoundedCornerShape(8.dp))
-                        .padding(8.dp)
-                ) {
-                    Text(
-                        text = "Instructions: ${medication.instructions}",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                    )
-                }
+            // Row 3: Description / Dosage (left) - Hide if blank
+            if (medication.dosage.isNotBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = medication.dosage,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
 
-            // Display next scheduled medication time / snoozed status
+            // Also show Instructions if not empty
+            if (medication.instructions.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = medication.instructions,
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            // Row 4: Next Schedule
             if (medication.isActive) {
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 val now = System.currentTimeMillis()
                 val isCurrentlySnoozed = medication.snoozedUntil > now
                 Row(
@@ -1941,11 +1841,9 @@ fun MedicationReminderCard(
                 }
             }
 
-
-
-            // Quick log actions
+            // Row 5: Completed / Taken and Skipped button
             if (medication.isActive) {
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -2145,7 +2043,7 @@ fun DoseHistoryCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
+                .padding(10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -2178,28 +2076,12 @@ fun DoseHistoryCard(
                 Spacer(modifier = Modifier.width(12.dp))
                 
                 Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = record.medicationName,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .background(memberColor.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
-                                .border(1.dp, memberColor.copy(alpha = 0.40f), RoundedCornerShape(6.dp))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = record.familyMemberName,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = memberColor
-                            )
-                        }
-                    }
+                    Text(
+                        text = record.medicationName,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
                     Spacer(modifier = Modifier.height(2.dp))
                     val displayStatus = if (record.status == "TAKEN") takenLabel else if (record.status == "SKIPPED") "Skipped" else record.status
                     Text(
@@ -2233,6 +2115,8 @@ fun AddFamilyProfileDialog(
     onDelete: (FamilyMember) -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val scrollState = rememberScrollState()
     var editingProfileId by remember { mutableStateOf<Long?>(null) }
     var editingProfileIsMe by remember { mutableStateOf(false) }
 
@@ -2246,7 +2130,12 @@ fun AddFamilyProfileDialog(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val uri: android.net.Uri? = result.data?.getParcelableExtra(android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            val uri: android.net.Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                result.data?.getParcelableExtra(android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI, android.net.Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                result.data?.getParcelableExtra(android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            }
             soundUri = uri?.toString() ?: ""
         }
     }
@@ -2271,53 +2160,41 @@ fun AddFamilyProfileDialog(
             modifier = Modifier
                 .fillMaxWidth(if (isProfileLandscape) 0.55f else 0.92f)
                 .widthIn(max = 420.dp)
+                .heightIn(max = (configProfile.screenHeightDp * if (isProfileLandscape) 0.92f else 0.88f).dp)
                 .padding(vertical = 12.dp)
+                .imePadding()
                 .testTag("add_profile_dialog"),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(20.dp)
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(scrollState)
+                    .padding(20.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Text(
-                    text = if (editingProfileId != null) "Edit $profileSing" else "Manage & Add $profilePlur",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Start
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = if (editingProfileId != null) Icons.Default.Edit else Icons.Default.PersonAdd,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = if (editingProfileId != null) "Edit $profileSing" else "Manage & Add $profilePlur",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f),
+                        textAlign = TextAlign.Start
+                    )
+                }
                 
                 Spacer(modifier = Modifier.height(16.dp))
-
-                if (editingProfileId != null) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = stringResource(R.string.editing_mode),
-                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.secondary
-                        )
-                        TextButton(
-                            onClick = {
-                                editingProfileId = null
-                                editingProfileIsMe = false
-                                name = ""
-                                soundUri = ""
-                                selectedColorIndex = 0
-                            }
-                        ) {
-                            Text("Switch to Create $profileSing")
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
                 
                 OutlinedTextField(
                     value = name,
@@ -2384,34 +2261,41 @@ fun AddFamilyProfileDialog(
                     com.example.SoundUtils.getSoundName(context, soundUri)
                 }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Alarm Sound",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                        )
-                        Text(
-                            text = currentSoundName,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = "Alarm Sound",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    OutlinedButton(
+                        onClick = {
+                            val intent = Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                                putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TYPE, android.media.RingtoneManager.TYPE_ALARM)
+                                putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                                putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+                                if (soundUri.isNotEmpty()) {
+                                    putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, android.net.Uri.parse(soundUri))
+                                }
+                            }
+                            ringtonePickerLauncher.launch(intent)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(currentSoundName, fontWeight = FontWeight.SemiBold)
                     }
-                    TextButton(onClick = {
-                        val intent = Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER).apply {
-                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TYPE, android.media.RingtoneManager.TYPE_ALARM)
-                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
-                            putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
-                        }
-                        ringtonePickerLauncher.launch(intent)
-                    }) {
-                        Text("Select Sound")
+                    val isDefault = soundUri.isEmpty() ||
+                        soundUri == "content://settings/system/alarm_alert" ||
+                        soundUri == android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_ALARM)?.toString()
+                    if (isDefault) {
+                        Text(
+                            text = "(Inherits system default sound)",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                        )
                     }
                 }
 
@@ -2421,11 +2305,29 @@ fun AddFamilyProfileDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    TextButton(onClick = onDismiss) {
-                        Text(stringResource(R.string.btn_cancel))
+                    OutlinedButton(
+                        onClick = {
+                            if (editingProfileId != null) {
+                                editingProfileId = null
+                                editingProfileIsMe = false
+                                name = ""
+                                soundUri = ""
+                                selectedColorIndex = 0
+                                inlineErrorMsg = null
+                                coroutineScope.launch {
+                                    scrollState.animateScrollTo(0)
+                                }
+                            } else {
+                                onDismiss()
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)
+                    ) {
+                        Text(stringResource(R.string.btn_cancel), fontWeight = FontWeight.SemiBold)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    Button(
+                    OutlinedButton(
                         onClick = {
                             if (name.trim().isEmpty()) {
                                 inlineErrorMsg = context.getString(R.string.error_empty_name)
@@ -2433,9 +2335,11 @@ fun AddFamilyProfileDialog(
                                 onSave(editingProfileId, name, colors[selectedColorIndex], soundUri, editingProfileIsMe)
                             }
                         },
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 10.dp),
                         modifier = Modifier.testTag("save_profile_button")
                     ) {
-                        Text(if (editingProfileId != null) "Update $profileSing" else "Save $profileSing")
+                        Text(if (editingProfileId != null) "Update" else "Save", fontWeight = FontWeight.Bold)
                     }
                 }
 
@@ -2458,7 +2362,13 @@ fun AddFamilyProfileDialog(
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
-                profiles.forEach { profile ->
+                profiles.forEachIndexed { index, profile ->
+                    if (index > 0) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(vertical = 2.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                        )
+                    }
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -2487,7 +2397,7 @@ fun AddFamilyProfileDialog(
                             )
                             Text(
                                 text = "Sound: $profSoundName",
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -2501,6 +2411,9 @@ fun AddFamilyProfileDialog(
                                 val idx = colors.indexOf(profile.colorHex)
                                 if (idx >= 0) {
                                     selectedColorIndex = idx
+                                }
+                                coroutineScope.launch {
+                                    scrollState.animateScrollTo(0)
                                 }
                             },
                             modifier = Modifier
@@ -2532,12 +2445,13 @@ fun AddFamilyProfileDialog(
                         } else {
                             Text(
                                 text = stringResource(R.string.required),
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f)
                             )
                         }
                     }
                 }
+                Spacer(modifier = Modifier.height(28.dp))
             }
         }
     }
@@ -2574,6 +2488,368 @@ fun AddFamilyProfileDialog(
 // Dialog: Add or Edit Medication Reminders
 @OptIn(ExperimentalLayoutApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
+fun AlertStartingTimeUI(
+    is12Hour: Boolean,
+    on12HourChange: (Boolean) -> Unit,
+    selectedHour: String,
+    onHourChange: (String) -> Unit,
+    selectedMinute: String,
+    onMinuteChange: (String) -> Unit,
+    isAm: Boolean,
+    onAmChange: (Boolean) -> Unit,
+    timeError: String?
+) {
+    val context = LocalContext.current
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = stringResource(R.string.alert_starting_time_title),
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Spacer(modifier = Modifier.height(2.dp))
+
+        // Split Hour and Minute Inputs
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            OutlinedTextField(
+                value = selectedHour,
+                onValueChange = {
+                    val cleaned = it.filter { char -> char.isDigit() }
+                    if (cleaned.length <= 2) {
+                        onHourChange(cleaned)
+                    }
+                },
+                label = { Text(stringResource(R.string.hour_label)) },
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("time_hour_input")
+                    .onFocusChanged { focusState ->
+                        if (focusState.isFocused) {
+                            onHourChange("")
+                        }
+                    },
+                singleLine = true,
+                isError = timeError != null
+            )
+
+            Text(
+                text = ":",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+
+            OutlinedTextField(
+                value = selectedMinute,
+                onValueChange = {
+                    val cleaned = it.filter { char -> char.isDigit() }
+                    if (cleaned.length <= 2) {
+                        onMinuteChange(cleaned)
+                    }
+                },
+                label = { Text(stringResource(R.string.minute_label)) },
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("time_minute_input")
+                    .onFocusChanged { focusState ->
+                        if (focusState.isFocused) {
+                            onMinuteChange("")
+                        }
+                    },
+                singleLine = true,
+                isError = timeError != null
+            )
+
+            if (is12Hour) {
+                Spacer(modifier = Modifier.width(4.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(0.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 8.dp)
+                ) {
+                    Button(
+                        onClick = { onAmChange(true) },
+                        shape = RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (isAm) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
+                            contentColor = if (isAm) Color.White else MaterialTheme.colorScheme.onSurface
+                        ),
+                        modifier = Modifier.height(34.dp).width(50.dp),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Text(stringResource(R.string.am_text), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    Button(
+                        onClick = { onAmChange(false) },
+                        shape = RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (!isAm) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
+                            contentColor = if (!isAm) Color.White else MaterialTheme.colorScheme.onSurface
+                        ),
+                        modifier = Modifier.height(34.dp).width(50.dp),
+                        contentPadding = PaddingValues(0.dp)
+                    ) {
+                        Text(stringResource(R.string.pm_text), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        if (timeError != null) {
+            Text(
+                text = timeError ?: "",
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FirstDayUI(
+    customStartDate: Long,
+    onDateChange: (Long) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "First Day",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+
+        var showDatePicker by remember { mutableStateOf(false) }
+
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = formatDateMmDdYyyy(customStartDate),
+                onValueChange = {},
+                readOnly = true,
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.CalendarToday,
+                        contentDescription = "Select calendar day"
+                    )
+                },
+                modifier = Modifier.fillMaxWidth().testTag("custom_start_date_input"),
+                singleLine = true
+            )
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color.Transparent)
+                    .clickable { showDatePicker = true }
+            )
+        }
+
+        if (showDatePicker) {
+            val initialUtcMillis = remember(customStartDate) {
+                val localCal = Calendar.getInstance().apply { timeInMillis = customStartDate }
+                val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                    clear()
+                    set(
+                        localCal.get(Calendar.YEAR),
+                        localCal.get(Calendar.MONTH),
+                        localCal.get(Calendar.DAY_OF_MONTH)
+                    )
+                }
+                utcCal.timeInMillis
+            }
+            val datePickerState = rememberDatePickerState(
+                initialSelectedDateMillis = initialUtcMillis
+            )
+            ThemedDatePickerDialog(
+                onDismissRequest = { showDatePicker = false },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            datePickerState.selectedDateMillis?.let { selectedUtcMillis ->
+                                val utcCal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                                    timeInMillis = selectedUtcMillis
+                                }
+                                val localCal = Calendar.getInstance().apply {
+                                    set(Calendar.YEAR, utcCal.get(Calendar.YEAR))
+                                    set(Calendar.MONTH, utcCal.get(Calendar.MONTH))
+                                    set(Calendar.DAY_OF_MONTH, utcCal.get(Calendar.DAY_OF_MONTH))
+                                    set(Calendar.HOUR_OF_DAY, 0)
+                                    set(Calendar.MINUTE, 0)
+                                    set(Calendar.SECOND, 0)
+                                    set(Calendar.MILLISECOND, 0)
+                                }
+                                onDateChange(localCal.timeInMillis)
+                            }
+                            showDatePicker = false
+                        }
+                    ) {
+                        Text("OK")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDatePicker = false }) {
+                        Text("Cancel")
+                    }
+                }
+            ) {
+                DatePicker(state = datePickerState)
+            }
+        }
+    }
+}
+
+@Composable
+fun AlarmSoundUI(
+    soundUri: String,
+    selectedProfileId: Long,
+    profiles: List<FamilyMember>,
+    ringtonePickerLauncher: androidx.activity.result.ActivityResultLauncher<Intent>
+) {
+    val context = LocalContext.current
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Spacer(modifier = Modifier.height(16.dp))
+        val currentSoundName = remember(soundUri, selectedProfileId) {
+            val profSound = profiles.find { it.id == selectedProfileId }?.soundUri
+            com.example.SoundUtils.getSoundName(context, soundUri, profSound)
+        }
+        Text(
+            text = "Alarm Sound",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+        OutlinedButton(
+            onClick = {
+                val intent = Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER).apply {
+                    putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TYPE, android.media.RingtoneManager.TYPE_ALARM)
+                    putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+                    putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+                    if (soundUri.isNotEmpty()) {
+                        putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, android.net.Uri.parse(soundUri))
+                    }
+                }
+                ringtonePickerLauncher.launch(intent)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text(currentSoundName, fontWeight = FontWeight.SemiBold)
+        }
+        if (soundUri.isEmpty()) {
+            Text(
+                text = "(Inherited from Profile default)",
+                fontSize = 12.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+fun NextAlarmPreviewCard(
+    nextAlarmInfo: NextAlarmInfo?,
+    isEditMode: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("next_alarm_preview_card"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Alarm,
+                    contentDescription = "Next Alarm",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (isEditMode) "NEXT ALARM AFTER UPDATE" else "NEXT SCHEDULED ALARM",
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    letterSpacing = 0.5.sp
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                if (nextAlarmInfo != null) {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = nextAlarmInfo.dayText,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            if (nextAlarmInfo != null) {
+                Text(
+                    text = nextAlarmInfo.fullDisplay,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.testTag("next_alarm_time_text")
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Schedule,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = nextAlarmInfo.relativeText,
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.testTag("next_alarm_preview_text")
+                    )
+                }
+            } else {
+                Text(
+                    text = "Enter time to preview next alarm",
+                    fontSize = 14.sp,
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class, androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
 fun AddEditMedicationScheduleDialog(
     medication: Medication?,
     profiles: List<FamilyMember>,
@@ -2598,17 +2874,30 @@ fun AddEditMedicationScheduleDialog(
         profileId: Long,
         isActive: Boolean,
         autoReset: Boolean,
-        soundUri: String
+        soundUri: String,
+        deleteAfterCompletion: Boolean,
+        recordInHistory: Boolean
     ) -> Unit
 ) {
     // Basic Form Fields
     val context = LocalContext.current
+    val sharedPref = remember { context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
+    
     var name by remember { mutableStateOf(medication?.name ?: "") }
     var dosage by remember { mutableStateOf(medication?.dosage ?: "") }
     var notes by remember { mutableStateOf(medication?.instructions ?: "") }
-    var scheduleType by remember { mutableStateOf(medication?.scheduleType ?: "WEEKLY") } // "WEEKLY", "INTERVAL" or "CUSTOM"
+    var scheduleType by remember { mutableStateOf(medication?.scheduleType ?: "ONE_TIME") } // "WEEKLY", "INTERVAL", "CUSTOM" or "ONE_TIME"
     
-    // Schedule Configuration: Weekly custom days
+    var deleteAfterCompletion by remember {
+        mutableStateOf(
+            if (medication != null) {
+                if (medication.scheduleType == "ONE_TIME") medication.deleteAfterCompletion else false
+            } else {
+                if (scheduleType == "ONE_TIME") sharedPref.getBoolean("pref_onetime_delete", true) else false
+            }
+        )
+    }
+    var recordInHistory by remember { mutableStateOf(medication?.recordInHistory ?: sharedPref.getBoolean("pref_onetime_history", true)) }
     val daysList = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
     val checkedDays = remember {
         val initialMap = mutableStateMapOf<String, Boolean>()
@@ -2624,11 +2913,69 @@ fun AddEditMedicationScheduleDialog(
     // Custom Configuration: Repeat value, unit, and start date
     var customRepeatValue by remember { mutableStateOf("1") }
     var customRepeatUnit by remember { mutableStateOf("days") }
-    var isAutoReset by remember { mutableStateOf(medication?.autoReset ?: false) }
+    var isAutoReset by remember {
+        mutableStateOf(
+            if (medication?.scheduleType == "CUSTOM" && medication.daysOfWeekCommaSeparated != "hours") {
+                medication.autoReset
+            } else {
+                sharedPref.getBoolean("pref_custom_reset", true)
+            }
+        )
+    }
     var customStartDate by remember { mutableStateOf(System.currentTimeMillis()) }
     
     // Time & Starting Configuration (AM/PM option with split hours & minutes)
-    var is12Hour by remember { mutableStateOf(true) }
+    var is12Hour by remember { mutableStateOf(sharedPref.getBoolean("pref_12h", true)) }
+    
+    val showDesc = remember(scheduleType) {
+        when(scheduleType) {
+            "ONE_TIME" -> sharedPref.getBoolean("pref_onetime_desc", true)
+            "INTERVAL" -> sharedPref.getBoolean("pref_interval_desc", true)
+            "WEEKLY" -> sharedPref.getBoolean("pref_weekly_desc", true)
+            "CUSTOM" -> sharedPref.getBoolean("pref_custom_desc", true)
+            else -> true
+        }
+    }
+    val showSound = remember(scheduleType) {
+        when(scheduleType) {
+            "ONE_TIME" -> sharedPref.getBoolean("pref_onetime_sound", true)
+            "INTERVAL" -> sharedPref.getBoolean("pref_interval_sound", true)
+            "WEEKLY" -> sharedPref.getBoolean("pref_weekly_sound", true)
+            "CUSTOM" -> sharedPref.getBoolean("pref_custom_sound", true)
+            else -> true
+        }
+    }
+
+    LaunchedEffect(scheduleType) {
+        if (scheduleType == "INTERVAL") {
+            customStartDate = System.currentTimeMillis()
+        }
+        if (medication == null) {
+            recordInHistory = when(scheduleType) {
+                "ONE_TIME" -> sharedPref.getBoolean("pref_onetime_history", true)
+                "INTERVAL" -> sharedPref.getBoolean("pref_interval_history", true)
+                "WEEKLY" -> sharedPref.getBoolean("pref_weekly_history", true)
+                "CUSTOM" -> sharedPref.getBoolean("pref_custom_history", true)
+                else -> true
+            }
+            if (scheduleType == "CUSTOM") {
+                isAutoReset = sharedPref.getBoolean("pref_custom_reset", true)
+            }
+            deleteAfterCompletion = if (scheduleType == "ONE_TIME") {
+                sharedPref.getBoolean("pref_onetime_delete", true)
+            } else {
+                false
+            }
+        } else {
+            if (scheduleType != "ONE_TIME") {
+                deleteAfterCompletion = false
+            } else if (medication.scheduleType == "ONE_TIME") {
+                deleteAfterCompletion = medication.deleteAfterCompletion
+            } else {
+                deleteAfterCompletion = sharedPref.getBoolean("pref_onetime_delete", true)
+            }
+        }
+    }
     
     var selectedHour by remember { mutableStateOf("") }
     var selectedMinute by remember { mutableStateOf("") }
@@ -2644,21 +2991,19 @@ fun AddEditMedicationScheduleDialog(
         mutableStateOf(medication?.familyMemberId ?: defaultId)
     }
 
-    var soundUri by remember { mutableStateOf(medication?.soundUri?.ifEmpty { null } ?: profiles.find { it.id == selectedProfileId }?.soundUri ?: "") }
+    var soundUri by remember { mutableStateOf(medication?.soundUri ?: "") }
 
     val ringtonePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val uri: android.net.Uri? = result.data?.getParcelableExtra(android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            val uri: android.net.Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                result.data?.getParcelableExtra(android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI, android.net.Uri::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                result.data?.getParcelableExtra(android.media.RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
+            }
             soundUri = uri?.toString() ?: ""
-        }
-    }
-    
-    // Update default sound if changing profile and no custom sound was set
-    LaunchedEffect(selectedProfileId) {
-        if (medication == null && soundUri.isEmpty()) {
-            soundUri = profiles.find { it.id == selectedProfileId }?.soundUri ?: ""
         }
     }
 
@@ -2666,17 +3011,25 @@ fun AddEditMedicationScheduleDialog(
     var nameError by remember { mutableStateOf<String?>(null) }
     var dosageError by remember { mutableStateOf<String?>(null) }
     var timeError by remember { mutableStateOf<String?>(null) }
+    val nameFocusRequester = remember { FocusRequester() }
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(medication) {
         name = medication?.name ?: ""
         dosage = medication?.dosage ?: ""
         notes = medication?.instructions ?: ""
-        scheduleType = medication?.scheduleType ?: "WEEKLY"
+        scheduleType = medication?.scheduleType ?: "ONE_TIME"
         intervalHours = medication?.intervalHours ?: 8
         
         customRepeatValue = if (medication?.scheduleType == "CUSTOM") medication.intervalHours.toString() else "1"
         customRepeatUnit = if (medication?.scheduleType == "CUSTOM") medication.daysOfWeekCommaSeparated else "days"
         customStartDate = if (medication?.scheduleType == "CUSTOM") medication.startDate else System.currentTimeMillis()
+        isAutoReset = if (medication?.scheduleType == "CUSTOM" && medication.daysOfWeekCommaSeparated != "hours") {
+            medication.autoReset
+        } else {
+            sharedPref.getBoolean("pref_custom_reset", true)
+        }
         
         daysList.forEach { day ->
             checkedDays[day] = medication?.daysOfWeekCommaSeparated?.contains(day) ?: false
@@ -2693,12 +3046,25 @@ fun AddEditMedicationScheduleDialog(
         dosageError = null
         timeError = null
 
-        val parts = (medication?.startTime ?: "08:30").split(":")
-        var hourInt = 8
-        var minuteInt = 30
-        if (parts.size == 2) {
-            hourInt = parts[0].toIntOrNull() ?: 8
-            minuteInt = parts[1].toIntOrNull() ?: 30
+        val hourInt: Int
+        val minuteInt: Int
+        if (medication != null) {
+            val parts = medication.startTime.split(":")
+            hourInt = parts.getOrNull(0)?.toIntOrNull() ?: 8
+            minuteInt = parts.getOrNull(1)?.toIntOrNull() ?: 30
+            customStartDate = if (medication.scheduleType == "CUSTOM") medication.startDate else medication.startDate
+        } else {
+            // New alarm: display the time corresponding to the next scheduled alarm time.
+            // If that time falls on the following day, the displayed day changes to the next day.
+            val nextAlarmCal = Calendar.getInstance().apply {
+                add(Calendar.HOUR_OF_DAY, 1)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            hourInt = nextAlarmCal.get(Calendar.HOUR_OF_DAY)
+            minuteInt = nextAlarmCal.get(Calendar.MINUTE)
+            customStartDate = nextAlarmCal.timeInMillis
         }
         
         isAm = hourInt < 12
@@ -2709,6 +3075,125 @@ fun AddEditMedicationScheduleDialog(
             hourInt.toString().padStart(2, '0')
         }
         selectedMinute = minuteInt.toString().padStart(2, '0')
+    }
+
+    // Dynamic date adjustment: If the user selects a past time today for a new one-time alarm, the displayed day changes to the next day.
+    LaunchedEffect(selectedHour, selectedMinute, isAm, is12Hour) {
+        if (medication != null || scheduleType != "ONE_TIME") return@LaunchedEffect
+        val hrVal = selectedHour.toIntOrNull()
+        val minVal = selectedMinute.toIntOrNull()
+        if (hrVal != null && minVal != null) {
+            val validHr = if (is12Hour) hrVal in 1..12 else hrVal in 0..23
+            val validMin = minVal in 0..59
+            if (validHr && validMin) {
+                val finalHr24 = if (is12Hour) {
+                    if (isAm) {
+                        if (hrVal == 12) 0 else hrVal
+                    } else {
+                        if (hrVal == 12) 12 else hrVal + 12
+                    }
+                } else {
+                    hrVal
+                }
+
+                val nowCal = Calendar.getInstance()
+                val targetToday = Calendar.getInstance().apply {
+                    set(Calendar.HOUR_OF_DAY, finalHr24)
+                    set(Calendar.MINUTE, minVal)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+
+                val customCal = Calendar.getInstance().apply { timeInMillis = customStartDate }
+                val isTodayOrTomorrow = (customCal.get(Calendar.YEAR) == nowCal.get(Calendar.YEAR)) &&
+                        (customCal.get(Calendar.DAY_OF_YEAR) == nowCal.get(Calendar.DAY_OF_YEAR) ||
+                         customCal.get(Calendar.DAY_OF_YEAR) == nowCal.get(Calendar.DAY_OF_YEAR) + 1)
+
+                if (isTodayOrTomorrow || customStartDate <= nowCal.timeInMillis) {
+                    if (targetToday.timeInMillis <= nowCal.timeInMillis) {
+                        // Past time on today -> change displayed day to next day (tomorrow)
+                        val tomorrowCal = Calendar.getInstance().apply {
+                            add(Calendar.DAY_OF_YEAR, 1)
+                            set(Calendar.HOUR_OF_DAY, 0)
+                            set(Calendar.MINUTE, 0)
+                            set(Calendar.SECOND, 0)
+                            set(Calendar.MILLISECOND, 0)
+                        }
+                        customStartDate = tomorrowCal.timeInMillis
+                    } else {
+                        // Future time on today -> change displayed day to today
+                        val todayCal = Calendar.getInstance().apply {
+                            set(Calendar.HOUR_OF_DAY, 0)
+                            set(Calendar.MINUTE, 0)
+                            set(Calendar.SECOND, 0)
+                            set(Calendar.MILLISECOND, 0)
+                        }
+                        customStartDate = todayCal.timeInMillis
+                    }
+                }
+            }
+        }
+    }
+
+    val previewNextAlarmInfo: NextAlarmInfo? by remember {
+        derivedStateOf {
+            val hrVal = selectedHour.toIntOrNull()
+            val minVal = selectedMinute.toIntOrNull()
+            if (hrVal == null || minVal == null) return@derivedStateOf null
+            val validHr = if (is12Hour) hrVal in 1..12 else hrVal in 0..23
+            val validMin = minVal in 0..59
+            if (!validHr || !validMin) return@derivedStateOf null
+
+            val finalHr24 = if (is12Hour) {
+                if (isAm) {
+                    if (hrVal == 12) 0 else hrVal
+                } else {
+                    if (hrVal == 12) 12 else hrVal + 12
+                }
+            } else {
+                hrVal
+            }
+            val formattedTime = "${finalHr24.toString().padStart(2, '0')}:${minVal.toString().padStart(2, '0')}"
+            val daysCommaStr = when (scheduleType) {
+                "WEEKLY" -> checkedDays.filter { it.value }.keys.joinToString(",")
+                "CUSTOM" -> customRepeatUnit
+                else -> ""
+            }
+            val finalIntervalHours = when (scheduleType) {
+                "CUSTOM" -> customRepeatValue.toIntOrNull() ?: 1
+                else -> intervalHours
+            }
+            val finalStartDate = if (scheduleType == "CUSTOM" || scheduleType == "ONE_TIME" || scheduleType == "INTERVAL") {
+                customStartDate
+            } else {
+                medication?.startDate ?: System.currentTimeMillis()
+            }
+
+            val tempMed = Medication(
+                id = medication?.id ?: 0L,
+                name = name.ifBlank { "Medication" },
+                dosage = dosage,
+                instructions = notes,
+                scheduleType = scheduleType,
+                daysOfWeekCommaSeparated = daysCommaStr,
+                intervalHours = finalIntervalHours,
+                startTime = formattedTime,
+                startDate = finalStartDate,
+                familyMemberId = selectedProfileId,
+                isActive = true,
+                autoReset = if (scheduleType == "CUSTOM" && customRepeatUnit != "hours") isAutoReset else false,
+                soundUri = soundUri,
+                deleteAfterCompletion = if (scheduleType == "ONE_TIME") deleteAfterCompletion else false,
+                recordInHistory = recordInHistory,
+                lastLoggedTime = 0L
+            )
+            val nextMillis = com.example.reminder.ReminderScheduler.calculateRawNextTrigger(tempMed, System.currentTimeMillis())
+            if (nextMillis > 0L) {
+                calculateNextAlarmInfo(nextMillis, is12Hour)
+            } else {
+                null
+            }
+        }
     }
 
     val configMed = LocalConfiguration.current
@@ -2729,18 +3214,31 @@ fun AddEditMedicationScheduleDialog(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 item {
-                    Text(
-                        text = if (medication == null) "New $medicationSing Schedule" else "Edit $medicationSing Schedule",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(
+                            imageVector = if (medication == null) Icons.Default.EventNote else Icons.Default.Edit,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = if (medication == null) "New Schedule" else "Edit Schedule",
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
 
                 // Field 4: Profile selector dropdown list (Moved to top)
@@ -2794,6 +3292,7 @@ fun AddEditMedicationScheduleDialog(
                         label = { Text("$medicationSing Name") },
                         modifier = Modifier
                             .fillMaxWidth()
+                            .focusRequester(nameFocusRequester)
                             .testTag("medication_name_input"),
                         singleLine = true,
                         isError = nameError != null,
@@ -2802,21 +3301,23 @@ fun AddEditMedicationScheduleDialog(
                 }
 
                 // Field 2: Dosage
-                item {
-                    OutlinedTextField(
-                        value = dosage,
-                        onValueChange = {
-                            dosage = it
-                            if (it.isNotBlank()) dosageError = null
-                        },
-                        label = { Text(dosageSing) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("medication_dosage_input"),
-                        singleLine = true,
-                        isError = dosageError != null,
-                        supportingText = dosageError?.let { { Text(it, color = MaterialTheme.colorScheme.error) } }
-                    )
+                if (showDesc) {
+                    item {
+                        OutlinedTextField(
+                            value = dosage,
+                            onValueChange = {
+                                dosage = it
+                                dosageError = null
+                            },
+                            label = { Text("$dosageSing (Optional)") },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("medication_dosage_input"),
+                            singleLine = true,
+                            isError = dosageError != null,
+                            supportingText = dosageError?.let { { Text(it, color = MaterialTheme.colorScheme.error) } }
+                        )
+                    }
                 }
 
                 // Field 5: Schedule Type
@@ -2834,30 +3335,28 @@ fun AddEditMedicationScheduleDialog(
                         horizontalArrangement = Arrangement.spacedBy(0.dp)
                     ) {
                         Button(
-                            onClick = { scheduleType = "WEEKLY" },
+                            onClick = { scheduleType = "ONE_TIME" },
                             modifier = Modifier
                                 .weight(1f)
-                                .testTag("type_weekly"),
+                                .testTag("type_one_time"),
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (scheduleType == "WEEKLY") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
-                                contentColor = if (scheduleType == "WEEKLY") Color.White else MaterialTheme.colorScheme.onSurface
+                                containerColor = if (scheduleType == "ONE_TIME") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
+                                contentColor = if (scheduleType == "ONE_TIME") Color.White else MaterialTheme.colorScheme.onSurface
                             ),
                             shape = RoundedCornerShape(topStart = 8.dp, bottomStart = 8.dp),
                             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
                         ) {
-                            val parts = stringResource(R.string.schedule_weekly_days).split(" ")
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(parts.getOrNull(0) ?: "Weekly", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                if (parts.size > 1) {
-                                    Text(parts.getOrNull(1) ?: "Days", fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                } else {
-                                    Spacer(modifier = Modifier.height(9.dp))
-                                }
+                                Text("One", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("Time", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
-                        
+
                         Button(
-                            onClick = { scheduleType = "INTERVAL" },
+                            onClick = {
+                                scheduleType = "INTERVAL"
+                                customStartDate = System.currentTimeMillis()
+                            },
                             modifier = Modifier
                                 .weight(1f)
                                 .testTag("type_interval"),
@@ -2870,9 +3369,32 @@ fun AddEditMedicationScheduleDialog(
                         ) {
                             val parts = stringResource(R.string.schedule_interval_hours).split(" ")
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(parts.getOrNull(0) ?: "Interval", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(parts.getOrNull(0) ?: "Interval", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 if (parts.size > 1) {
-                                    Text(parts.getOrNull(1) ?: "Hours", fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(parts.getOrNull(1) ?: "Hours", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                } else {
+                                    Spacer(modifier = Modifier.height(9.dp))
+                                }
+                            }
+                        }
+                        
+                        Button(
+                            onClick = { scheduleType = "WEEKLY" },
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("type_weekly"),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (scheduleType == "WEEKLY") MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
+                                contentColor = if (scheduleType == "WEEKLY") Color.White else MaterialTheme.colorScheme.onSurface
+                            ),
+                            shape = RoundedCornerShape(0.dp),
+                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
+                        ) {
+                            val parts = stringResource(R.string.schedule_weekly_days).split(" ")
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(parts.getOrNull(0) ?: "Weekly", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                if (parts.size > 1) {
+                                    Text(parts.getOrNull(1) ?: "Days", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 } else {
                                     Spacer(modifier = Modifier.height(9.dp))
                                 }
@@ -2892,8 +3414,8 @@ fun AddEditMedicationScheduleDialog(
                             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
                         ) {
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("Custom", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text("Repeat", fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("Custom", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text("Repeat", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -2902,6 +3424,12 @@ fun AddEditMedicationScheduleDialog(
                 // Field 6: Conditional Parameters Configuration
                 item {
                     Column(modifier = Modifier.fillMaxWidth()) {
+                        if (scheduleType == "ONE_TIME") {
+                            // REORDERED FOR ONE TIME: Alert Starting Time, First Day, Alarm Sound
+                            // Actually we can just show them in order below since they are common or we can show them here specifically for one time
+                            // Let's implement the specific order for ONE_TIME
+                        }
+
                         if (scheduleType == "WEEKLY") {
                             Text(
                                 text = stringResource(R.string.weekly_custom_days_title),
@@ -3028,29 +3556,6 @@ fun AddEditMedicationScheduleDialog(
 
                             Spacer(modifier = Modifier.height(14.dp))
 
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { isAutoReset = !isAutoReset }
-                            ) {
-                                Checkbox(
-                                    checked = isAutoReset,
-                                    onCheckedChange = { isAutoReset = it }
-                                )
-                                Text("Auto Reset")
-                            }
-                            if (isAutoReset) {
-                                Text(
-                                    text = "The Alarm reset to the time of $takenLabel and Skipped.",
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(start = 12.dp, bottom = 8.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(14.dp))
-
                             // Part 2: Calendar to select the first day mm/dd/yyyy.
                             Text(
                                 text = "First Day",
@@ -3135,219 +3640,107 @@ fun AddEditMedicationScheduleDialog(
                                     DatePicker(state = datePickerState)
                                 }
                             }
-                        }
-                    }
-                }
 
-                // Field 7: Alert Trigger Starting Time (AM/PM option with split hours and minutes)
-                item {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = stringResource(R.string.alert_starting_time_title),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-
-                        // Toggle between 12-Hour format and 24-Hour format
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    if (!is12Hour) {
-                                        val hr = selectedHour.toIntOrNull() ?: 8
-                                        isAm = hr < 12
-                                        val h12 = if (hr % 12 == 0) 12 else hr % 12
-                                        selectedHour = h12.toString()
-                                        is12Hour = true
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (is12Hour) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
-                                    contentColor = if (is12Hour) Color.White else MaterialTheme.colorScheme.onSurface
-                                ),
-                                modifier = Modifier.weight(1f).height(38.dp),
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
-                            ) {
-                                Text(stringResource(R.string.twelve_hour_format), fontSize = 12.sp)
-                            }
-
-                            Button(
-                                onClick = {
-                                    if (is12Hour) {
-                                        var hr = selectedHour.toIntOrNull() ?: 8
-                                        if (hr < 1 || hr > 12) hr = 12
-                                        val h24 = if (isAm) {
-                                            if (hr == 12) 0 else hr
-                                        } else {
-                                            if (hr == 12) 12 else hr + 12
-                                        }
-                                        selectedHour = h24.toString().padStart(2, '0')
-                                        is12Hour = false
-                                    }
-                                },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (!is12Hour) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
-                                    contentColor = if (!is12Hour) Color.White else MaterialTheme.colorScheme.onSurface
-                                ),
-                                modifier = Modifier.weight(1f).height(38.dp),
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
-                            ) {
-                                Text(stringResource(R.string.twenty_four_hour_format), fontSize = 12.sp)
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Split Hour and Minute Inputs
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            OutlinedTextField(
-                                value = selectedHour,
-                                onValueChange = {
-                                    val cleaned = it.filter { char -> char.isDigit() }
-                                    if (cleaned.length <= 2) {
-                                        selectedHour = cleaned
-                                        timeError = null
-                                    }
-                                },
-                                label = { Text(stringResource(R.string.hour_label)) },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("time_hour_input")
-                                    .onFocusChanged { focusState ->
-                                        if (focusState.isFocused) {
-                                            selectedHour = ""
-                                        }
-                                    },
-                                singleLine = true,
-                                isError = timeError != null
-                            )
-
-                            Text(
-                                text = ":",
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-
-                            OutlinedTextField(
-                                value = selectedMinute,
-                                onValueChange = {
-                                    val cleaned = it.filter { char -> char.isDigit() }
-                                    if (cleaned.length <= 2) {
-                                        selectedMinute = cleaned
-                                        timeError = null
-                                    }
-                                },
-                                label = { Text(stringResource(R.string.minute_label)) },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("time_minute_input")
-                                    .onFocusChanged { focusState ->
-                                        if (focusState.isFocused) {
-                                            selectedMinute = ""
-                                        }
-                                    },
-                                singleLine = true,
-                                isError = timeError != null
-                            )
-
-                            if (is12Hour) {
-                                Spacer(modifier = Modifier.width(4.dp))
+                            if (customRepeatUnit != "hours") {
+                                Spacer(modifier = Modifier.height(10.dp))
                                 Row(
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                                     verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(top = 8.dp)
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { isAutoReset = !isAutoReset }
+                                        .testTag("reset_day_count_row")
                                 ) {
-                                    Button(
-                                        onClick = { isAm = true },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (isAm) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
-                                            contentColor = if (isAm) Color.White else MaterialTheme.colorScheme.onSurface
-                                        ),
-                                        modifier = Modifier.height(34.dp).width(50.dp),
-                                        contentPadding = PaddingValues(0.dp)
-                                    ) {
-                                        Text(stringResource(R.string.am_text), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    }
-
-                                    Button(
-                                        onClick = { isAm = false },
-                                        colors = ButtonDefaults.buttonColors(
-                                            containerColor = if (!isAm) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.1f),
-                                            contentColor = if (!isAm) Color.White else MaterialTheme.colorScheme.onSurface
-                                        ),
-                                        modifier = Modifier.height(34.dp).width(50.dp),
-                                        contentPadding = PaddingValues(0.dp)
-                                    ) {
-                                        Text(stringResource(R.string.pm_text), fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    }
+                                    Checkbox(
+                                        checked = isAutoReset,
+                                        onCheckedChange = { isAutoReset = it },
+                                        modifier = Modifier.testTag("reset_day_count_checkbox")
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Reset day count",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
                                 }
                             }
                         }
+                    }
+                }
 
-                        if (timeError != null) {
-                            Text(
-                                text = timeError ?: "",
-                                color = MaterialTheme.colorScheme.error,
-                                fontSize = 12.sp,
-                                modifier = Modifier.padding(top = 4.dp)
+                // Reorder fields if ONE_TIME
+                if (scheduleType == "ONE_TIME") {
+                    item {
+                        FirstDayUI(
+                            customStartDate = customStartDate,
+                            onDateChange = { customStartDate = it }
+                        )
+                    }
+                    item {
+                        AlertStartingTimeUI(
+                            is12Hour = is12Hour,
+                            on12HourChange = { is12Hour = it },
+                            selectedHour = selectedHour,
+                            onHourChange = { selectedHour = it },
+                            selectedMinute = selectedMinute,
+                            onMinuteChange = { selectedMinute = it },
+                            isAm = isAm,
+                            onAmChange = { isAm = it },
+                            timeError = timeError
+                        )
+                    }
+
+                    if (showSound) {
+                        item {
+                            AlarmSoundUI(
+                                soundUri = soundUri,
+                                selectedProfileId = selectedProfileId,
+                                profiles = profiles,
+                                ringtonePickerLauncher = ringtonePickerLauncher
+                            )
+                        }
+                    }
+                } else {
+                    // Field 7: Alert Trigger Starting Time (AM/PM option with split hours and minutes)
+                    item {
+                        AlertStartingTimeUI(
+                            is12Hour = is12Hour,
+                            on12HourChange = { is12Hour = it },
+                            selectedHour = selectedHour,
+                            onHourChange = { selectedHour = it },
+                            selectedMinute = selectedMinute,
+                            onMinuteChange = { selectedMinute = it },
+                            isAm = isAm,
+                            onAmChange = { isAm = it },
+                            timeError = timeError
+                        )
+                    }
+
+                    // For Custom or Interval, we might also need First Day
+                    if (scheduleType == "CUSTOM") {
+                        // Custom already has First Day inside its conditional block, but user might want it reordered?
+                        // Let's keep it as is for other types unless they want it changed too.
+                    }
+
+                    // Sound Selector
+                    if (showSound) {
+                        item {
+                            AlarmSoundUI(
+                                soundUri = soundUri,
+                                selectedProfileId = selectedProfileId,
+                                profiles = profiles,
+                                ringtonePickerLauncher = ringtonePickerLauncher
                             )
                         }
                     }
                 }
 
-                // Sound Selector
+                // Next Scheduled Alarm Preview (Prevents skipping after update)
                 item {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    val currentSoundName = remember(soundUri, selectedProfileId) {
-                        val profSound = profiles.find { it.id == selectedProfileId }?.soundUri
-                        com.example.SoundUtils.getSoundName(context, soundUri, profSound)
-                    }
-                    Text(
-                        text = "Alarm Sound",
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(bottom = 8.dp)
+                    NextAlarmPreviewCard(
+                        nextAlarmInfo = previewNextAlarmInfo,
+                        isEditMode = medication != null
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = currentSoundName,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            if (soundUri.isEmpty()) {
-                                Text(
-                                    text = "(Inherited from Profile default)",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        TextButton(onClick = {
-                            val intent = Intent(android.media.RingtoneManager.ACTION_RINGTONE_PICKER).apply {
-                                putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_TYPE, android.media.RingtoneManager.TYPE_ALARM)
-                                putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
-                                putExtra(android.media.RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
-                            }
-                            ringtonePickerLauncher.launch(intent)
-                        }) {
-                            Text("Select Sound")
-                        }
-                    }
                 }
 
                 // Save or Cancel Buttons
@@ -3357,20 +3750,29 @@ fun AddEditMedicationScheduleDialog(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
-                        TextButton(onClick = onDismiss) {
-                            Text(stringResource(R.string.btn_cancel))
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
+                            modifier = Modifier.testTag("cancel_medication_button")
+                        ) {
+                            Text(stringResource(R.string.btn_cancel), fontWeight = FontWeight.SemiBold)
                         }
                         Spacer(modifier = Modifier.width(8.dp))
-                        Button(
+                        OutlinedButton(
                             onClick = {
                                 var hasError = false
                                 if (name.trim().isEmpty()) {
                                     nameError = "$medicationSing name is required"
                                     hasError = true
-                                }
-                                if (dosage.trim().isEmpty()) {
-                                    dosageError = "$dosageSing is required"
-                                    hasError = true
+                                    coroutineScope.launch {
+                                        listState.animateScrollToItem(2)
+                                        try {
+                                            nameFocusRequester.requestFocus()
+                                        } catch (e: Exception) {
+                                            // Ignore if focus requester is not yet attached
+                                        }
+                                    }
                                 }
 
                                 val hrVal = selectedHour.toIntOrNull()
@@ -3409,7 +3811,7 @@ fun AddEditMedicationScheduleDialog(
                                         else -> intervalHours
                                     }
 
-                                    val finalStartDate = if (scheduleType == "CUSTOM") {
+                                    var finalStartDate = if (scheduleType == "CUSTOM" || scheduleType == "ONE_TIME" || scheduleType == "INTERVAL") {
                                         customStartDate
                                     } else {
                                         medication?.startDate ?: System.currentTimeMillis()
@@ -3424,7 +3826,25 @@ fun AddEditMedicationScheduleDialog(
                                     } else {
                                         hrVal
                                     }
+
                                     val formattedStartTime = "${finalHr24.toString().padStart(2, '0')}:${minVal.toString().padStart(2, '0')}"
+
+                                    // Use the exact calculated next alarm info when saving
+                                    val nextMillis = previewNextAlarmInfo?.triggerMillis ?: 0L
+                                    if (nextMillis > 0L && scheduleType == "ONE_TIME") {
+                                        finalStartDate = nextMillis
+                                    }
+
+                                    previewNextAlarmInfo?.let { info ->
+                                        val msg = if (info.relativeText.isNotBlank()) {
+                                            "Alarm set for ${info.dayText} at ${info.timeText} (${info.relativeText})"
+                                        } else {
+                                            "Alarm set for ${info.dayText} at ${info.timeText}"
+                                        }
+                                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                                    }
+
+                                    val finalAutoReset = if (scheduleType == "CUSTOM" && customRepeatUnit != "hours") isAutoReset else false
 
                                     onSave(
                                         name.trim(),
@@ -3437,14 +3857,18 @@ fun AddEditMedicationScheduleDialog(
                                         finalStartDate,
                                         selectedProfileId,
                                         medication?.isActive ?: true,
-                                        isAutoReset,
-                                        soundUri
+                                        finalAutoReset,
+                                        soundUri,
+                                        if (scheduleType == "ONE_TIME") deleteAfterCompletion else false,
+                                        recordInHistory
                                     )
                                 }
                             },
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 10.dp),
                             modifier = Modifier.testTag("save_medication_button")
                         ) {
-                            Text(if (medication == null) "Create $medicationSing Schedule" else "Save Changes")
+                            Text(if (medication != null) "Update" else "Save", fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -3791,41 +4215,61 @@ fun DataTransferDialog(
     val configTransfer = LocalConfiguration.current
     val isTransferLandscape = configTransfer.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    ThemedDialog(onDismissRequest = onDismiss) {
+    ThemedDialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
         Card(
             shape = RoundedCornerShape(24.dp),
             modifier = Modifier
-                .fillMaxWidth(if (isTransferLandscape) 0.55f else 0.92f)
-                .widthIn(max = 420.dp)
+                .fillMaxWidth(if (isTransferLandscape) 0.65f else 0.94f)
+                .widthIn(max = 480.dp)
+                .heightIn(max = (configTransfer.screenHeightDp * if (isTransferLandscape) 0.92f else 0.90f).dp)
                 .padding(vertical = 12.dp)
+                .imePadding()
                 .testTag("data_transfer_dialog"),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
         ) {
             Column(
                 modifier = Modifier
-                    .padding(24.dp)
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp)
             ) {
-                // Header
+                // Header with Title, Icon, and Close Button
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.ImportExport,
-                        contentDescription = stringResource(R.string.data_transfer_icon_desc),
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(28.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = stringResource(R.string.backup_restore_title),
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ImportExport,
+                            contentDescription = stringResource(R.string.data_transfer_icon_desc),
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = stringResource(R.string.backup_restore_title),
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = stringResource(R.string.btn_close),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 // Custom Tab Row
                 TabRow(
@@ -3907,7 +4351,7 @@ fun DataTransferDialog(
                     }
 
                     // Export triggers
-                    Button(
+                    OutlinedButton(
                         onClick = {
                             saveJsonLauncher.launch("medrem_backup.json")
                         },
@@ -3921,7 +4365,7 @@ fun DataTransferDialog(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Button(
+                    OutlinedButton(
                         onClick = {
                             val profileFilter = if (selectedExportProfileId == 0L) null else selectedExportProfileId
                             val jsonString = viewModel.exportSchedulesJson(profileFilter)
@@ -3944,7 +4388,7 @@ fun DataTransferDialog(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Button(
+                    OutlinedButton(
                         onClick = {
                             val profileFilter = if (selectedExportProfileId == 0L) null else selectedExportProfileId
                             val jsonString = viewModel.exportSchedulesJson(profileFilter)
@@ -3972,7 +4416,7 @@ fun DataTransferDialog(
                                 context.startActivity(Intent.createChooser(shareIntent, context.getString(R.string.btn_share_backup)))
                             }
                         },
-                        modifier = Modifier.fillMaxWidth().height(48.dp).testTag("share_export_json_button"),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("share_export_json_button"),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Icon(Icons.Default.Share, stringResource(R.string.share_icon_desc))
@@ -3980,6 +4424,7 @@ fun DataTransferDialog(
                         Text(stringResource(R.string.btn_share_backup), fontWeight = FontWeight.Bold)
                     }
 
+                    Spacer(modifier = Modifier.height(16.dp))
                 } else {
                     // IMPORT TAB UI
                     Text(
@@ -3990,11 +4435,11 @@ fun DataTransferDialog(
                     )
 
                     // Open JSON File Button
-                    Button(
+                    OutlinedButton(
                         onClick = {
                             openJsonLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
                         },
-                        modifier = Modifier.fillMaxWidth().height(48.dp).testTag("open_json_file_button"),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("open_json_file_button"),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Icon(Icons.Default.FolderOpen, contentDescription = "Open file icon")
@@ -4005,7 +4450,7 @@ fun DataTransferDialog(
                     Spacer(modifier = Modifier.height(10.dp))
 
                     // Quick Paste Button
-                    Button(
+                    OutlinedButton(
                         onClick = {
                             val clipboardManager = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
                             val itemText = clipboardManager?.primaryClip?.getItemAt(0)?.text?.toString()
@@ -4016,7 +4461,7 @@ fun DataTransferDialog(
                                 Toast.makeText(context, context.getString(R.string.toast_clipboard_empty), Toast.LENGTH_SHORT).show()
                             }
                         },
-                        modifier = Modifier.fillMaxWidth().height(48.dp).testTag("quick_paste_button"),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("quick_paste_button"),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Icon(Icons.Default.ContentPaste, stringResource(R.string.paste_icon_desc))
@@ -4032,9 +4477,9 @@ fun DataTransferDialog(
                         placeholder = { Text(stringResource(R.string.paste_placeholder)) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(160.dp)
+                            .height(140.dp)
                             .testTag("import_text_field"),
-                        maxLines = 15,
+                        maxLines = 10,
                         textStyle = MaterialTheme.typography.bodySmall,
                         shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(
@@ -4049,7 +4494,7 @@ fun DataTransferDialog(
                     if (importValidationErrorMsg != null) {
                         Card(
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
                         ) {
                             Text(
                                 text = importValidationErrorMsg ?: "",
@@ -4061,7 +4506,7 @@ fun DataTransferDialog(
                     } else if (hasParsedSuccessfully) {
                         Card(
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text(
@@ -4078,117 +4523,72 @@ fun DataTransferDialog(
                         }
                     }
 
-                    // Action proceed trigger
-                    Button(
-                        onClick = {
-                            viewModel.importSchedulesJson(importText) { result ->
-                                if (result.success) {
-                                    val profWord = if (result.importedProfilesCount == 1) profileSing.lowercase() else profilePlur.lowercase()
-                                    val medWord = if (result.importedMedicationsCount == 1) medicationSing.lowercase() else medicationPlur.lowercase()
-                                    Toast.makeText(
-                                        context,
-                                        "Import successful! Added ${result.importedProfilesCount} $profWord and ${result.importedMedicationsCount} $medWord.",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                    onDismiss()
-                                } else {
-                                    Toast.makeText(
-                                        context,
-                                        result.errorMessage ?: context.getString(R.string.import_failed_default),
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                }
-                            }
-                        },
-                        enabled = hasParsedSuccessfully,
-                        modifier = Modifier.fillMaxWidth().height(48.dp).testTag("execute_import_button"),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
-                        Icon(Icons.Default.Check, stringResource(R.string.import_icon_desc))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(stringResource(R.string.btn_proceed_import), fontWeight = FontWeight.Bold)
-                    }
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                Spacer(modifier = Modifier.height(16.dp))
 
-                // Dismiss button
-                TextButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.align(Alignment.End).testTag("close_transfer_dialog_button")
+                // Bottom Action Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(stringResource(R.string.btn_close))
+                    if (activeTab == 1) {
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
+                            modifier = Modifier.testTag("close_transfer_dialog_button")
+                        ) {
+                            Text(stringResource(R.string.btn_close), fontWeight = FontWeight.SemiBold)
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.importSchedulesJson(importText) { result ->
+                                    if (result.success) {
+                                        val profWord = if (result.importedProfilesCount == 1) profileSing.lowercase() else profilePlur.lowercase()
+                                        val medWord = if (result.importedMedicationsCount == 1) medicationSing.lowercase() else medicationPlur.lowercase()
+                                        Toast.makeText(
+                                            context,
+                                            "Import successful! Added ${result.importedProfilesCount} $profWord and ${result.importedMedicationsCount} $medWord.",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                        onDismiss()
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            result.errorMessage ?: context.getString(R.string.import_failed_default),
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                }
+                            },
+                            enabled = hasParsedSuccessfully,
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
+                            modifier = Modifier.testTag("execute_import_button")
+                        ) {
+                            Text(stringResource(R.string.btn_proceed_import), fontWeight = FontWeight.Bold)
+                        }
+                    } else {
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 24.dp, vertical = 10.dp),
+                            modifier = Modifier.testTag("close_transfer_dialog_button")
+                        ) {
+                            Text(stringResource(R.string.btn_close), fontWeight = FontWeight.SemiBold)
+                        }
+                    }
                 }
-            }
-        }
-    }
-}
 
-@Composable
-fun DeveloperInfoCard(modifier: Modifier = Modifier) {
-    val uriHandler = LocalUriHandler.current
-    val developerLink = stringResource(id = R.string.developer_link)
-    val developerTag = stringResource(id = R.string.developer_info_card_tag)
-    val logoDesc = stringResource(id = R.string.company_logo_description)
-    val prefixText = stringResource(id = R.string.developer_info_prefix)
-    val nameText = stringResource(id = R.string.developer_name)
-    val suffixText = stringResource(id = R.string.developer_info_suffix)
-
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .border(
-                width = 1.dp,
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
-                shape = RoundedCornerShape(12.dp)
-            )
-            .clip(RoundedCornerShape(12.dp))
-            .clickable {
-                uriHandler.openUri(developerLink)
+                // Generous bottom breathing room
+                Spacer(modifier = Modifier.height(8.dp))
             }
-            .testTag(developerTag),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
-        )
-    ) {
-        Row(
-            modifier = Modifier
-                .padding(horizontal = 12.dp, vertical = 10.dp)
-                .fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color.White),
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.m4),
-                    contentDescription = logoDesc,
-                    modifier = Modifier.size(30.dp)
-                )
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            val annotatedText = buildAnnotatedString {
-                val prefix = prefixText.trim()
-                val name = nameText.trim()
-                val suffix = suffixText.trim()
-                append("$prefix ")
-                withStyle(style = SpanStyle(fontWeight = FontWeight.Bold)) {
-                    append(name)
-                }
-                append(suffix)
-            }
-            Text(
-                text = annotatedText,
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurface,
-                lineHeight = 18.sp,
-                modifier = Modifier.weight(1f)
-            )
         }
     }
 }

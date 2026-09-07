@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.media.Ringtone
 import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
@@ -66,6 +67,8 @@ object ActiveAlarmManager {
 class MedicationAlarmService : Service() {
 
     private var mediaPlayer: MediaPlayer? = null
+    private var ringtone: Ringtone? = null
+    private var currentlyPlayingUri: String? = null
     private var vibrator: android.os.Vibrator? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO)
 
@@ -109,11 +112,14 @@ class MedicationAlarmService : Service() {
             return START_NOT_STICKY
         }
 
-        // Standard alarm trigger
-        // Persistent Alarm: ensure sound & vibration are running if already alive
-        if (mediaPlayer == null || mediaPlayer?.isPlaying == false) {
-            startAlarmSound(soundUriStr)
+        if (action == ACTION_UPDATE_SOUND) {
+            val updateMemberId = intent.getLongExtra("FAMILY_MEMBER_ID", -1L)
+            val updatedSoundUri = intent.getStringExtra("SOUND_URI")
+            updateSoundPlayback(explicitFamilyMemberId = updateMemberId, fallbackSoundUri = updatedSoundUri)
+            return START_STICKY
         }
+
+        // Standard alarm trigger
         startVibration()
 
         if (medId != -1L) {
@@ -121,49 +127,146 @@ class MedicationAlarmService : Service() {
             ActiveAlarmManager.addAlarm(reminder)
         }
 
+        updateSoundPlayback(explicitMedId = medId, explicitFamilyMemberId = familyMemberId, fallbackSoundUri = soundUriStr)
+
         return START_STICKY
     }
 
-    private fun startAlarmSound(customUriString: String? = null) {
-        try {
-            mediaPlayer?.release()
-        } catch (e: Exception) {
-            Log.e(TAG, "Error releasing old MediaPlayer: ${e.message}")
+    private fun updateSoundPlayback(
+        explicitMedId: Long = -1L,
+        explicitFamilyMemberId: Long = -1L,
+        fallbackSoundUri: String? = null
+    ) {
+        serviceScope.launch {
+            try {
+                val db = AppDatabase.getDatabase(applicationContext)
+                val dao = db.dao()
+
+                val activeList = ActiveAlarmManager.activeAlarms.value
+                val targetMedId = if (explicitMedId != -1L) explicitMedId else (activeList.firstOrNull()?.medId ?: -1L)
+                val targetMemberId = if (explicitFamilyMemberId != -1L) explicitFamilyMemberId else (activeList.firstOrNull()?.familyMemberId ?: -1L)
+
+                val med = if (targetMedId != -1L) dao.getMedicationById(targetMedId) else null
+                val finalMemberId = if (targetMemberId != -1L) targetMemberId else (med?.familyMemberId ?: -1L)
+                val member = if (finalMemberId != -1L) dao.getFamilyMemberById(finalMemberId) else null
+
+                val effectiveSoundUri = med?.soundUri?.ifEmpty { null }
+                    ?: member?.soundUri?.ifEmpty { null }
+                    ?: fallbackSoundUri?.ifEmpty { null }
+
+                startAlarmSound(effectiveSoundUri)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error resolving sound playback from database: ${e.message}", e)
+                startAlarmSound(fallbackSoundUri)
+            }
         }
-        mediaPlayer = null
+    }
 
-        val customUri = if (!customUriString.isNullOrEmpty()) android.net.Uri.parse(customUriString) else null
+    private fun getCandidateSoundUris(context: Context, customUriString: String?): List<Uri> {
+        val list = mutableListOf<Uri>()
 
-        val uris = listOfNotNull(
-            customUri,
-            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),
-            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
-            RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-        )
+        if (!customUriString.isNullOrEmpty()) {
+            val parsed = Uri.parse(customUriString)
+            val isDefaultSymbolic = RingtoneManager.isDefault(parsed) ||
+                customUriString == "content://settings/system/alarm_alert" ||
+                customUriString == RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString()
 
-        for (uri in uris) {
-            if (uri == null) continue
+            if (isDefaultSymbolic) {
+                RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_ALARM)?.let { list.add(it) }
+            }
+            list.add(parsed)
+        }
+
+        // Actual default alarm sound (resolves the concrete media URI that MediaPlayer can open)
+        RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_ALARM)?.let {
+            if (!list.contains(it)) list.add(it)
+        }
+        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.let {
+            if (!list.contains(it)) list.add(it)
+        }
+
+        // Fallback: Ringtone
+        RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_RINGTONE)?.let {
+            if (!list.contains(it)) list.add(it)
+        }
+        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)?.let {
+            if (!list.contains(it)) list.add(it)
+        }
+
+        // Fallback: Notification
+        RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_NOTIFICATION)?.let {
+            if (!list.contains(it)) list.add(it)
+        }
+        RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)?.let {
+            if (!list.contains(it)) list.add(it)
+        }
+
+        return list
+    }
+
+    private fun startAlarmSound(customUriString: String? = null) {
+        val effectiveUriStr = customUriString?.ifEmpty { null }
+
+        // If sound is already actively playing and target sound hasn't changed, continue playing
+        val isCurrentlyPlaying = (mediaPlayer?.isPlaying == true) || (ringtone?.isPlaying == true)
+        if (isCurrentlyPlaying && currentlyPlayingUri == effectiveUriStr) {
+            Log.d(TAG, "Alarm sound is already playing: $effectiveUriStr")
+            return
+        }
+
+        stopAlarmSoundOnly()
+
+        val candidateUris = getCandidateSoundUris(applicationContext, effectiveUriStr)
+        Log.d(TAG, "Attempting to play alarm sound with candidates: $candidateUris")
+
+        // 1. Try MediaPlayer
+        for (uri in candidateUris) {
             try {
                 val mp = MediaPlayer().apply {
-                    setDataSource(applicationContext, uri)
                     setAudioAttributes(
                         AudioAttributes.Builder()
                             .setUsage(AudioAttributes.USAGE_ALARM)
                             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                             .build()
                     )
+                    setDataSource(applicationContext, uri)
                     isLooping = true
                     prepare()
                     start()
                 }
                 mediaPlayer = mp
-                Log.d(TAG, "MediaPlayer successfully started looping alarm with: $uri")
-                return // Started successfully!
+                currentlyPlayingUri = effectiveUriStr
+                Log.d(TAG, "MediaPlayer successfully started playing: $uri")
+                return
             } catch (e: Exception) {
-                Log.e(TAG, "Failed playing sound with URI $uri: ${e.message}. Trying next...")
+                Log.e(TAG, "MediaPlayer failed for URI $uri: ${e.message}")
             }
         }
-        Log.e(TAG, "All fallback URIs failed to play alarm sound!")
+
+        // 2. Try Ringtone fallback (handles Settings content URIs natively)
+        for (uri in candidateUris) {
+            try {
+                val rt = RingtoneManager.getRingtone(applicationContext, uri)
+                if (rt != null) {
+                    rt.audioAttributes = AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ALARM)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                        rt.isLooping = true
+                    }
+                    rt.play()
+                    ringtone = rt
+                    currentlyPlayingUri = effectiveUriStr
+                    Log.d(TAG, "Ringtone successfully started playing: $uri")
+                    return
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Ringtone fallback failed for URI $uri: ${e.message}")
+            }
+        }
+
+        Log.e(TAG, "All alarm sound playback candidates failed!")
     }
 
     private fun startVibration() {
@@ -197,8 +300,7 @@ class MedicationAlarmService : Service() {
         }
     }
 
-    private fun stopAlarmSound() {
-        stopVibration()
+    private fun stopAlarmSoundOnly() {
         try {
             mediaPlayer?.apply {
                 if (isPlaying) {
@@ -206,11 +308,23 @@ class MedicationAlarmService : Service() {
                 }
                 release()
             }
-            mediaPlayer = null
-            Log.d(TAG, "MediaPlayer stopped and released")
         } catch (e: Exception) {
-            Log.e(TAG, "Error stopping Media Player: ${e.message}", e)
+            Log.e(TAG, "Error stopping MediaPlayer: ${e.message}")
         }
+        mediaPlayer = null
+
+        try {
+            ringtone?.stop()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error stopping Ringtone: ${e.message}")
+        }
+        ringtone = null
+        currentlyPlayingUri = null
+    }
+
+    private fun stopAlarmSound() {
+        stopVibration()
+        stopAlarmSoundOnly()
     }
 
     private suspend fun showForegroundNotification() {
@@ -239,7 +353,7 @@ class MedicationAlarmService : Service() {
         }
 
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val channelId = "medrem_urgent_alarms"
+        val channelId = "medrem_urgent_alarms_v2"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -248,7 +362,8 @@ class MedicationAlarmService : Service() {
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "High-priority $medicationPlur alarms with sound and visual overlays."
-                enableVibration(true)
+                enableVibration(false)
+                setSound(null, null)
                 setBypassDnd(true)
             }
             notificationManager.createNotificationChannel(channel)
@@ -274,6 +389,7 @@ class MedicationAlarmService : Service() {
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setSilent(true)
             .setAutoCancel(false)
             .setOngoing(true)
             .setFullScreenIntent(fullScreenPendingIntent, true)
@@ -421,22 +537,43 @@ class MedicationAlarmService : Service() {
                         } else {
                             "Me"
                         }
-                        val record = DoseRecord(
-                            medicationId = rem.medId,
-                            medicationName = rem.medName,
-                            familyMemberName = familyMemberName,
-                            dosage = rem.dosage,
-                            scheduledTime = now,
-                            actualTime = now,
-                            status = "TAKEN"
-                        )
-                        dao.insertDoseRecord(record)
+
                         if (medication != null) {
-                            val updatedMed = medication.copy(lastLoggedTime = now, snoozedUntil = 0L)
-                            dao.insertMedication(updatedMed)
-                            if (updatedMed.isActive) {
-                                ReminderScheduler.scheduleAlarm(applicationContext, updatedMed)
+                            if (medication.recordInHistory) {
+                                val record = DoseRecord(
+                                    medicationId = rem.medId,
+                                    medicationName = rem.medName,
+                                    familyMemberName = familyMemberName,
+                                    dosage = rem.dosage,
+                                    scheduledTime = now,
+                                    actualTime = now,
+                                    status = "TAKEN"
+                                )
+                                dao.insertDoseRecord(record)
                             }
+
+                            if (medication.scheduleType == "ONE_TIME" && medication.deleteAfterCompletion) {
+                                ReminderScheduler.cancelAlarm(applicationContext, medication)
+                                dao.deleteMedication(medication)
+                            } else {
+                                var updatedMed = medication.copy(lastLoggedTime = now, snoozedUntil = 0L)
+                                if (medication.autoReset && medication.scheduleType == "CUSTOM" && medication.daysOfWeekCommaSeparated != "hours") {
+                                    val calendar = java.util.Calendar.getInstance()
+                                    calendar.timeInMillis = now
+                                    calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                                    calendar.set(java.util.Calendar.MINUTE, 0)
+                                    calendar.set(java.util.Calendar.SECOND, 0)
+                                    calendar.set(java.util.Calendar.MILLISECOND, 0)
+                                    updatedMed = updatedMed.copy(startDate = calendar.timeInMillis)
+                                }
+                                dao.insertMedication(updatedMed)
+                                if (updatedMed.isActive) {
+                                    ReminderScheduler.scheduleAlarm(applicationContext, updatedMed)
+                                }
+                            }
+                        } else {
+                            // Medication already deleted or not found, but we still log if we have info?
+                            // Actually if it's null we can't check recordInHistory
                         }
                     }
                 } else if (action == ACTION_DISMISS_ALL) {
@@ -479,23 +616,44 @@ class MedicationAlarmService : Service() {
                         }
 
                         val status = if (action == ACTION_TAKE) "TAKEN" else "SKIPPED"
-                        val record = DoseRecord(
-                            medicationId = medId,
-                            medicationName = medName,
-                            familyMemberName = familyMemberName,
-                            dosage = dosage,
-                            scheduledTime = now,
-                            actualTime = now,
-                            status = status
-                        )
-                        dao.insertDoseRecord(record)
-                        Log.d(TAG, "Logged dose record from Alarm Service: medName=$medName, status=$status")
 
                         if (medication != null) {
-                            val updatedMed = medication.copy(lastLoggedTime = now, snoozedUntil = 0L)
-                            dao.insertMedication(updatedMed)
-                            if (updatedMed.isActive) {
-                                ReminderScheduler.scheduleAlarm(applicationContext, updatedMed)
+                            if (medication.recordInHistory) {
+                                val record = DoseRecord(
+                                    medicationId = medId,
+                                    medicationName = medName,
+                                    familyMemberName = familyMemberName,
+                                    dosage = dosage,
+                                    scheduledTime = now,
+                                    actualTime = now,
+                                    status = status
+                                )
+                                dao.insertDoseRecord(record)
+                            }
+
+                            if (medication.scheduleType == "ONE_TIME") {
+                                ReminderScheduler.cancelAlarm(applicationContext, medication)
+                                if (medication.deleteAfterCompletion) {
+                                    dao.deleteMedication(medication)
+                                } else {
+                                    val disabledMed = medication.copy(isActive = false, lastLoggedTime = now, snoozedUntil = 0L)
+                                    dao.insertMedication(disabledMed)
+                                }
+                            } else {
+                                var updatedMed = medication.copy(lastLoggedTime = now, snoozedUntil = 0L)
+                                if (medication.autoReset && medication.scheduleType == "CUSTOM" && medication.daysOfWeekCommaSeparated != "hours") {
+                                    val calendar = java.util.Calendar.getInstance()
+                                    calendar.timeInMillis = now
+                                    calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                                    calendar.set(java.util.Calendar.MINUTE, 0)
+                                    calendar.set(java.util.Calendar.SECOND, 0)
+                                    calendar.set(java.util.Calendar.MILLISECOND, 0)
+                                    updatedMed = updatedMed.copy(startDate = calendar.timeInMillis)
+                                }
+                                dao.insertMedication(updatedMed)
+                                if (updatedMed.isActive) {
+                                    ReminderScheduler.scheduleAlarm(applicationContext, updatedMed)
+                                }
                             }
                         }
                     }
@@ -519,5 +677,6 @@ class MedicationAlarmService : Service() {
         const val ACTION_DISMISS = "com.example.reminder.service.ACTION_DISMISS"
         const val ACTION_TAKE_ALL = "com.example.reminder.service.ACTION_TAKE_ALL"
         const val ACTION_DISMISS_ALL = "com.example.reminder.service.ACTION_DISMISS_ALL"
+        const val ACTION_UPDATE_SOUND = "com.example.reminder.service.ACTION_UPDATE_SOUND"
     }
 }

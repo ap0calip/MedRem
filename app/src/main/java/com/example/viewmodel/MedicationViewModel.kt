@@ -1,6 +1,7 @@
 package com.example.viewmodel
 
 import android.app.Application
+import android.content.Intent
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -9,6 +10,8 @@ import com.example.data.entity.DoseRecord
 import com.example.data.entity.FamilyMember
 import com.example.data.entity.Medication
 import com.example.data.repository.MedicationRepository
+import com.example.reminder.ActiveAlarmManager
+import com.example.reminder.MedicationAlarmService
 import com.example.reminder.ReminderScheduler
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -37,6 +40,7 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
         // Reschedule active alarms on startup in case they were lost or restored from Auto Backup
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
+                repository.sanitizeRecurringDeleteAfterCompletion()
                 val activeMeds = dao.getAllActiveMedications()
                 for (med in activeMeds) {
                     ReminderScheduler.scheduleAlarm(application, med)
@@ -233,10 +237,31 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             if (name.isNotBlank()) {
                 val member = FamilyMember(id = id, name = name.trim(), colorHex = colorHex, soundUri = soundUri, isMe = isMe)
-                if (id == 0L) {
+                val memberId = if (id == 0L) {
                     repository.insertFamilyMember(member)
                 } else {
                     repository.updateFamilyMember(member)
+                    id
+                }
+
+                // Reschedule active medications for this profile so scheduled alarms reflect updated sound
+                val activeMeds = repository.getAllActiveMedications().filter { it.familyMemberId == memberId }
+                activeMeds.forEach { med ->
+                    ReminderScheduler.scheduleAlarm(getApplication(), med)
+                }
+
+                // If alarm service is actively running with alarms, notify it to update the playing sound live
+                if (ActiveAlarmManager.activeAlarms.value.isNotEmpty()) {
+                    val updateIntent = Intent(getApplication(), MedicationAlarmService::class.java).apply {
+                        action = MedicationAlarmService.ACTION_UPDATE_SOUND
+                        putExtra("FAMILY_MEMBER_ID", memberId)
+                        putExtra("SOUND_URI", soundUri)
+                    }
+                    try {
+                        getApplication<Application>().startService(updateIntent)
+                    } catch (e: Exception) {
+                        Log.e("MedicationViewModel", "Failed to send ACTION_UPDATE_SOUND to service: ${e.message}")
+                    }
                 }
             }
         }
@@ -272,15 +297,29 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
         isActive: Boolean = true,
         snoozedUntil: Long = 0L,
         autoReset: Boolean = false,
-        soundUri: String
+        soundUri: String,
+        deleteAfterCompletion: Boolean = false,
+        recordInHistory: Boolean = true
     ) {
         viewModelScope.launch {
             var lastLogged = 0L
             if (id != 0L) {
                 repository.getMedicationById(id)?.let {
-                    lastLogged = it.lastLoggedTime
+                    // Only preserve lastLogged if schedule parameters haven't changed.
+                    // If user updated time, days, schedule type, or start date, clear lastLogged so the newly scheduled alarm is not skipped.
+                    if (it.startTime == startTime &&
+                        it.scheduleType == scheduleType &&
+                        it.daysOfWeekCommaSeparated == daysOfWeekCommaSeparated &&
+                        it.intervalHours == intervalHours &&
+                        it.startDate == startDate) {
+                        lastLogged = it.lastLoggedTime
+                    } else {
+                        lastLogged = 0L
+                    }
                 }
             }
+
+            val effectiveDeleteAfterCompletion = if (scheduleType == "ONE_TIME") deleteAfterCompletion else false
 
             val med = Medication(
                 id = id,
@@ -297,7 +336,9 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                 snoozedUntil = snoozedUntil,
                 lastLoggedTime = lastLogged,
                 autoReset = autoReset,
-                soundUri = soundUri
+                soundUri = soundUri,
+                deleteAfterCompletion = effectiveDeleteAfterCompletion,
+                recordInHistory = recordInHistory
             )
 
             val newId = repository.insertMedication(med)
@@ -329,17 +370,36 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
             val memberName = member?.name ?: "Me"
 
             val now = System.currentTimeMillis()
-            val record = DoseRecord(
-                medicationId = medication.id,
-                medicationName = medication.name,
-                familyMemberName = memberName,
-                dosage = medication.dosage,
-                scheduledTime = now, // manual logging schedules for now
-                actualTime = now,
-                status = status
-            )
+            val nextReminderTime = if (medication.snoozedUntil > now) {
+                medication.snoozedUntil
+            } else {
+                ReminderScheduler.getNextTriggerTime(medication, now)
+            }
+            val scheduledDoseTime = if (nextReminderTime > 0L) nextReminderTime else now
 
-            repository.insertDoseRecord(record)
+            if (medication.recordInHistory) {
+                val record = DoseRecord(
+                    medicationId = medication.id,
+                    medicationName = medication.name,
+                    familyMemberName = memberName,
+                    dosage = medication.dosage,
+                    scheduledTime = scheduledDoseTime,
+                    actualTime = now,
+                    status = status
+                )
+                repository.insertDoseRecord(record)
+            }
+
+            if (medication.scheduleType == "ONE_TIME") {
+                ReminderScheduler.cancelAlarm(getApplication(), medication)
+                if (medication.deleteAfterCompletion) {
+                    repository.deleteMedication(medication)
+                } else {
+                    val disabledMed = medication.copy(isActive = false, snoozedUntil = 0L, lastLoggedTime = now)
+                    repository.insertMedication(disabledMed)
+                }
+                return@launch
+            }
 
             // Auto reschedule to next interval or day
             var updatedMed = if (medication.isActive) {
@@ -348,12 +408,9 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                 medication.copy(lastLoggedTime = now)
             }
 
-            if (medication.autoReset) {
+            if (medication.autoReset && medication.scheduleType == "CUSTOM" && medication.daysOfWeekCommaSeparated != "hours") {
                 val calendar = java.util.Calendar.getInstance()
                 calendar.timeInMillis = now
-                val hour = calendar.get(java.util.Calendar.HOUR_OF_DAY)
-                val minute = calendar.get(java.util.Calendar.MINUTE)
-                val formattedTime = String.format("%02d:%02d", hour, minute)
                 
                 calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
                 calendar.set(java.util.Calendar.MINUTE, 0)
@@ -361,8 +418,7 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                 calendar.set(java.util.Calendar.MILLISECOND, 0)
                 
                 updatedMed = updatedMed.copy(
-                    startDate = calendar.timeInMillis,
-                    startTime = formattedTime
+                    startDate = calendar.timeInMillis
                 )
             }
             
@@ -376,6 +432,48 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
     fun deleteDoseRecord(recordId: Long) {
         viewModelScope.launch {
             repository.deleteDoseRecord(recordId)
+        }
+    }
+
+    fun clearAllDoseRecords(onComplete: ((Int) -> Unit)? = null) {
+        viewModelScope.launch {
+            val count = doseRecords.value.size
+            repository.deleteAllDoseRecords()
+            onComplete?.invoke(count)
+        }
+    }
+
+    fun clearDoseRecordsByMedication(medicationId: Long, medicationName: String, onComplete: ((Int) -> Unit)? = null) {
+        viewModelScope.launch {
+            val count = doseRecords.value.count { it.medicationId == medicationId || it.medicationName.equals(medicationName, ignoreCase = true) }
+            repository.deleteDoseRecordsByMedicationId(medicationId)
+            repository.deleteDoseRecordsByMedicationName(medicationName)
+            onComplete?.invoke(count)
+        }
+    }
+
+    fun clearDoseRecordsByFamilyMember(memberName: String, onComplete: ((Int) -> Unit)? = null) {
+        viewModelScope.launch {
+            val count = doseRecords.value.count { it.familyMemberName.equals(memberName, ignoreCase = true) }
+            repository.deleteDoseRecordsByFamilyMemberName(memberName)
+            onComplete?.invoke(count)
+        }
+    }
+
+    fun clearDoseRecordsOlderThan(days: Int, onComplete: ((Int) -> Unit)? = null) {
+        viewModelScope.launch {
+            val cutoff = System.currentTimeMillis() - (days.toLong() * 24 * 60 * 60 * 1000L)
+            val count = doseRecords.value.count { it.actualTime < cutoff }
+            repository.deleteDoseRecordsOlderThan(cutoff)
+            onComplete?.invoke(count)
+        }
+    }
+
+    fun clearDoseRecordsByStatus(status: String, onComplete: ((Int) -> Unit)? = null) {
+        viewModelScope.launch {
+            val count = doseRecords.value.count { it.status.equals(status, ignoreCase = true) }
+            repository.deleteDoseRecordsByStatus(status)
+            onComplete?.invoke(count)
         }
     }
 
@@ -427,6 +525,8 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                     put("snoozedUntil", med.snoozedUntil)
                     put("lastLoggedTime", med.lastLoggedTime)
                     put("soundUri", med.soundUri)
+                    put("deleteAfterCompletion", med.deleteAfterCompletion)
+                    put("recordInHistory", med.recordInHistory)
                 }
                 medsArr.put(medObj)
             }
@@ -525,6 +625,8 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                     val snoozedUntil = medObj.optLong("snoozedUntil", 0L)
                     val lastLoggedTime = medObj.optLong("lastLoggedTime", 0L)
                     val soundUri = medObj.optString("soundUri", "")
+                    val deleteAfterCompletion = medObj.optBoolean("deleteAfterCompletion", false)
+                    val recordInHistory = medObj.optBoolean("recordInHistory", true)
 
                     val mappedFamilyMemberId = profileIdMap[origFamilyMemberId] ?: defaultFamilyId
 
@@ -551,7 +653,9 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
                             isActive = isActive,
                             snoozedUntil = snoozedUntil,
                             lastLoggedTime = lastLoggedTime,
-                            soundUri = soundUri
+                            soundUri = soundUri,
+                            deleteAfterCompletion = if (scheduleType == "ONE_TIME") deleteAfterCompletion else false,
+                            recordInHistory = recordInHistory
                         )
                         val newMedId = repository.insertMedication(medInstance)
                         val insertedMed = medInstance.copy(id = newMedId)

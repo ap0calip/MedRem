@@ -91,7 +91,7 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
         familyMemberId: Long
     ) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val channelId = "medrem_reminders"
+        val channelId = "medrem_reminders_v2"
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -100,7 +100,8 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = context.getString(R.string.notification_channel_reminders_desc)
-                enableVibration(true)
+                enableVibration(false)
+                setSound(null, null)
             }
             notificationManager.createNotificationChannel(channel)
         }
@@ -166,6 +167,7 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
                 .setContentTitle("$profileName: $medName")
                 .setContentText(dosage)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setSilent(true)
                 .setAutoCancel(true)
                 .setContentIntent(mainPendingIntent)
                 .setCategory(NotificationCompat.CATEGORY_ALARM)
@@ -246,20 +248,43 @@ class MedicationAlarmReceiver : BroadcastReceiver() {
                 }
 
                 val now = System.currentTimeMillis()
-                val record = DoseRecord(
-                    medicationId = medId,
-                    medicationName = medName,
-                    familyMemberName = familyMemberName,
-                    dosage = dosage,
-                    scheduledTime = now, // Approximate scheduled time
-                    actualTime = now,
-                    status = status
-                )
-                dao.insertDoseRecord(record)
-                Log.d(TAG, "Logged dose record: medName=$medName, status=$status")
-
                 if (medication != null) {
-                    val updatedMed = medication.copy(lastLoggedTime = now, snoozedUntil = 0L)
+                    if (medication.recordInHistory) {
+                        val record = DoseRecord(
+                            medicationId = medId,
+                            medicationName = medName,
+                            familyMemberName = familyMemberName,
+                            dosage = dosage,
+                            scheduledTime = now, // Approximate scheduled time
+                            actualTime = now,
+                            status = status
+                        )
+                        dao.insertDoseRecord(record)
+                    }
+
+                    if (medication.scheduleType == "ONE_TIME") {
+                        ReminderScheduler.cancelAlarm(context, medication)
+                        if (medication.deleteAfterCompletion) {
+                            dao.deleteMedication(medication)
+                            Log.d(TAG, "Medication deleted after completion: ${medication.name}")
+                        } else {
+                            val disabledMed = medication.copy(isActive = false, lastLoggedTime = now, snoozedUntil = 0L)
+                            dao.insertMedication(disabledMed)
+                            Log.d(TAG, "Medication disabled after completion: ${medication.name}")
+                        }
+                        return@launch
+                    }
+
+                    var updatedMed = medication.copy(lastLoggedTime = now, snoozedUntil = 0L)
+                    if (medication.autoReset && medication.scheduleType == "CUSTOM" && medication.daysOfWeekCommaSeparated != "hours") {
+                        val calendar = java.util.Calendar.getInstance()
+                        calendar.timeInMillis = now
+                        calendar.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                        calendar.set(java.util.Calendar.MINUTE, 0)
+                        calendar.set(java.util.Calendar.SECOND, 0)
+                        calendar.set(java.util.Calendar.MILLISECOND, 0)
+                        updatedMed = updatedMed.copy(startDate = calendar.timeInMillis)
+                    }
                     dao.insertMedication(updatedMed)
                     if (updatedMed.isActive) {
                         ReminderScheduler.scheduleAlarm(context, updatedMed)

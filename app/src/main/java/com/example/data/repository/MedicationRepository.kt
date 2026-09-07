@@ -64,6 +64,10 @@ class MedicationRepository(private val dao: AppDao) {
         dao.deleteMedication(medication)
     }
 
+    suspend fun sanitizeRecurringDeleteAfterCompletion() {
+        dao.sanitizeRecurringDeleteAfterCompletion()
+    }
+
     suspend fun insertDoseRecord(record: DoseRecord): Long {
         return dao.insertDoseRecord(record)
     }
@@ -78,5 +82,21 @@ class MedicationRepository(private val dao: AppDao) {
 
     suspend fun deleteDoseRecordsByFamilyMemberName(familyMemberName: String) {
         dao.deleteDoseRecordsByFamilyMemberName(familyMemberName)
+    }
+
+    suspend fun deleteAllDoseRecords() {
+        dao.deleteAllDoseRecords()
+    }
+
+    suspend fun deleteDoseRecordsByMedicationName(medicationName: String) {
+        dao.deleteDoseRecordsByMedicationName(medicationName)
+    }
+
+    suspend fun deleteDoseRecordsOlderThan(timestamp: Long) {
+        dao.deleteDoseRecordsOlderThan(timestamp)
+    }
+
+    suspend fun deleteDoseRecordsByStatus(status: String) {
+        dao.deleteDoseRecordsByStatus(status)
     }
 }

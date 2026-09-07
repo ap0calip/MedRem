@@ -11,10 +11,18 @@ object SoundUtils {
      */
     fun getSoundName(context: Context, soundUri: String?, profileSoundUri: String? = null): String {
         val effectiveUriStr = soundUri?.ifEmpty { null } ?: profileSoundUri?.ifEmpty { null }
-        if (effectiveUriStr.isNullOrEmpty()) {
+        if (effectiveUriStr.isNullOrEmpty() ||
+            effectiveUriStr == "content://settings/system/alarm_alert" ||
+            effectiveUriStr == RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)?.toString()
+        ) {
             return try {
-                val defaultUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
-                val ringtone = RingtoneManager.getRingtone(context, defaultUri)
+                val actualDefaultUri = RingtoneManager.getActualDefaultRingtoneUri(context, RingtoneManager.TYPE_ALARM)
+                val ringtone = if (actualDefaultUri != null) {
+                    RingtoneManager.getRingtone(context, actualDefaultUri)
+                } else {
+                    val defaultUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+                    RingtoneManager.getRingtone(context, defaultUri)
+                }
                 val title = ringtone?.getTitle(context)
                 if (!title.isNullOrEmpty()) "Default ($title)" else "Default Alarm Sound"
             } catch (e: Exception) {

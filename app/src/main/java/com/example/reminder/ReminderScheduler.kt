@@ -13,7 +13,7 @@ import java.util.Calendar
 object ReminderScheduler {
     private const val TAG = "ReminderScheduler"
 
-    private fun calculateRawNextTrigger(medication: Medication, startAfterMillis: Long): Long {
+    fun calculateRawNextTrigger(medication: Medication, startAfterMillis: Long = System.currentTimeMillis()): Long {
         val parts = medication.startTime.split(":")
         val hour = parts.getOrNull(0)?.toIntOrNull() ?: 8
         val minute = parts.getOrNull(1)?.toIntOrNull() ?: 0
@@ -75,18 +75,6 @@ object ReminderScheduler {
             }
 
         } else if (medication.scheduleType == "CUSTOM") {
-            val startCal = Calendar.getInstance().apply {
-                timeInMillis = medication.startDate
-                set(Calendar.HOUR_OF_DAY, hour)
-                set(Calendar.MINUTE, minute)
-                set(Calendar.SECOND, 0)
-                set(Calendar.MILLISECOND, 0)
-            }
-
-            if (startCal.timeInMillis > startAfterMillis) {
-                return startCal.timeInMillis
-            }
-
             val repeatNum = if (medication.intervalHours <= 0) 1 else medication.intervalHours
             val repeatUnit = medication.daysOfWeekCommaSeparated
 
@@ -99,16 +87,38 @@ object ReminderScheduler {
                 else -> Calendar.DAY_OF_YEAR
             }
 
+            val startCal = Calendar.getInstance().apply {
+                timeInMillis = medication.startDate
+                set(Calendar.HOUR_OF_DAY, hour)
+                set(Calendar.MINUTE, minute)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+
+            // If autoReset is enabled and a dose was already logged on or after the startDate day:
+            if (medication.autoReset && repeatUnit != "hours" && medication.lastLoggedTime != 0L) {
+                val logCal = Calendar.getInstance().apply { timeInMillis = medication.lastLoggedTime }
+                val startDayCal = Calendar.getInstance().apply { timeInMillis = medication.startDate }
+                val isLoggedOnOrAfterStartDay = logCal.get(Calendar.ERA) == startDayCal.get(Calendar.ERA) &&
+                        (logCal.get(Calendar.YEAR) > startDayCal.get(Calendar.YEAR) ||
+                                (logCal.get(Calendar.YEAR) == startDayCal.get(Calendar.YEAR) &&
+                                        logCal.get(Calendar.DAY_OF_YEAR) >= startDayCal.get(Calendar.DAY_OF_YEAR)))
+                
+                if (isLoggedOnOrAfterStartDay) {
+                    // Advance startCal by at least 1 interval from the start day
+                    startCal.add(field, repeatNum)
+                }
+            }
+
+            if (startCal.timeInMillis > startAfterMillis) {
+                return startCal.timeInMillis
+            }
+
             if (field == Calendar.HOUR_OF_DAY) {
                 val hourMillis = repeatNum * 60 * 60 * 1000L
                 val elapsed = startAfterMillis - startCal.timeInMillis
                 val count = (elapsed / hourMillis) + 1
                 return startCal.timeInMillis + (count * hourMillis)
-            } else if (field == Calendar.DAY_OF_YEAR) {
-                val dayMillis = repeatNum * 24 * 60 * 60 * 1000L
-                val elapsed = startAfterMillis - startCal.timeInMillis
-                val count = (elapsed / dayMillis) + 1
-                return startCal.timeInMillis + (count * dayMillis)
             } else {
                 var safetyCount = 0
                 while (startCal.timeInMillis <= startAfterMillis && safetyCount < 1000) {
@@ -117,6 +127,30 @@ object ReminderScheduler {
                 }
                 return startCal.timeInMillis
             }
+        } else if (medication.scheduleType == "ONE_TIME") {
+            val targetCal = Calendar.getInstance().apply {
+                timeInMillis = medication.startDate
+                set(Calendar.HOUR_OF_DAY, hour)
+                set(Calendar.MINUTE, minute)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            if (targetCal.timeInMillis <= startAfterMillis) {
+                val todayCal = Calendar.getInstance().apply {
+                    timeInMillis = startAfterMillis
+                    set(Calendar.HOUR_OF_DAY, hour)
+                    set(Calendar.MINUTE, minute)
+                    set(Calendar.SECOND, 0)
+                    set(Calendar.MILLISECOND, 0)
+                }
+                if (todayCal.timeInMillis > startAfterMillis) {
+                    return todayCal.timeInMillis
+                } else {
+                    todayCal.add(Calendar.DAY_OF_YEAR, 1)
+                    return todayCal.timeInMillis
+                }
+            }
+            return targetCal.timeInMillis
         } else {
             // INTERVAL BASED
             val startCal = Calendar.getInstance().apply {
@@ -146,7 +180,7 @@ object ReminderScheduler {
         var nextTrigger = calculateRawNextTrigger(medication, currentMillis)
 
         // Adjust Next Trigger if a dose was logged within 30 minutes of this scheduled time
-        if (medication.lastLoggedTime != 0L && nextTrigger - medication.lastLoggedTime < 30 * 60 * 1000L) {
+        if (medication.lastLoggedTime != 0L && (nextTrigger - medication.lastLoggedTime) in 0L until (30 * 60 * 1000L)) {
             nextTrigger = calculateRawNextTrigger(medication, nextTrigger + 60_000L)
         }
 

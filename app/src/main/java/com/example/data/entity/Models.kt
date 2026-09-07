@@ -41,7 +41,9 @@ data class Medication(
     val snoozedUntil: Long = 0L,
     val lastLoggedTime: Long = 0L,
     val autoReset: Boolean = false,
-    val soundUri: String = ""
+    val soundUri: String = "",
+    val deleteAfterCompletion: Boolean = false,
+    val recordInHistory: Boolean = true
 )
 
 @Entity(tableName = "dose_records")

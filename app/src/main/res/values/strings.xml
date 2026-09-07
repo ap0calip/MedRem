@@ -66,7 +66,7 @@
     <string name="label_assign_to_profile">Assign to Profile</string>
     <string name="med_name_label">Medication Name (e.g. Paracetamol)</string>
     <string name="dosage_label">Dosage (e.g. 1 Tablet, 10ml)</string>
-    <string name="schedule_type_selection_title">Reminders Type Selection</string>
+    <string name="schedule_type_selection_title">Type</string>
     <string name="schedule_weekly_days">Weekly Days</string>
     <string name="schedule_interval_hours">Interval Hours</string>
     <string name="weekly_custom_days_title">Weekly Custom Days selection</string>
@@ -114,7 +114,7 @@
     <string name="import_success_toast">Import successful! Added %1$d profile(s) and %2$d schedule(s).</string>
     <string name="import_failed_default">Failed to import schedule bundle</string>
     <string name="error_invalid_json">Invalid JSON data: %s</string>
-    <string name="btn_proceed_import">Proceed and Import Bundle</string>
+    <string name="btn_proceed_import">Import</string>
     <string name="data_transfer_icon_desc">Data Transfer Icon</string>
     <string name="copy_icon_desc">Copy icon</string>
     <string name="share_icon_desc">Share icon</string>
@@ -139,4 +139,8 @@
     <string name="alarm_activity_doses_due">You have %d doses due now:</string>
     <string name="btn_take_all">Take All</string>
     <string name="btn_snooze_all_label">Snooze All</string>
+
+    <!-- Navigation Menu -->
+    <string name="menu_review_app">Review the app</string>
+    <string name="menu_about">About</string>
 </resources>

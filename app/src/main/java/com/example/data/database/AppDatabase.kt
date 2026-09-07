@@ -13,7 +13,7 @@ import com.example.data.entity.Medication
 
 @Database(
     entities = [FamilyMember::class, Medication::class, DoseRecord::class],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -44,6 +44,22 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                try {
+                    db.execSQL("ALTER TABLE medications ADD COLUMN deleteAfterCompletion INTEGER NOT NULL DEFAULT 0")
+                    db.execSQL("ALTER TABLE medications ADD COLUMN recordInHistory INTEGER NOT NULL DEFAULT 1")
+                } catch (e: Exception) {
+                    // Ignore if column already exists
+                }
+                try {
+                    db.execSQL("ALTER TABLE family_members ADD COLUMN isMe INTEGER NOT NULL DEFAULT 0")
+                } catch (e: Exception) {
+                    // Ignore if column already exists
+                }
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -51,7 +67,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "medrem_database"
                 )
-                .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
