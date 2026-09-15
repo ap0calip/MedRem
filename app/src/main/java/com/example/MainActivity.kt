@@ -318,6 +318,55 @@ fun MedRemAppContent(
     // Active navigation tab (0 = Medications, 1 = Dose History)
     var activeTab by rememberSaveable { mutableStateOf(0) }
 
+    // Live ticker to keep the next alarm countdown updated
+    var currentTimeMillis by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(10_000L)
+            currentTimeMillis = System.currentTimeMillis()
+        }
+    }
+
+    // First next reminder time calculation for the top bar header
+    val (nextAlarmText, nextAlarmIcon) = remember(allMedications, selectedProfileId, currentTimeMillis) {
+        val activeMeds = if (selectedProfileId != 0L) {
+            val forProfile = allMedications.filter { it.isActive && it.familyMemberId == selectedProfileId }
+            if (forProfile.isNotEmpty()) forProfile else allMedications.filter { it.isActive }
+        } else {
+            allMedications.filter { it.isActive }
+        }
+
+        val earliestNextTrigger = activeMeds.map { med ->
+            if (med.snoozedUntil > currentTimeMillis) {
+                med.snoozedUntil
+            } else {
+                com.example.reminder.ReminderScheduler.getNextTriggerTime(med, currentTimeMillis)
+            }
+        }.minOrNull()
+
+        if (earliestNextTrigger != null) {
+            val diffMillis = (earliestNextTrigger - currentTimeMillis).coerceAtLeast(0L)
+            val hrs = diffMillis / 3600_000L
+            val mins = (diffMillis % 3600_000L) / 60_000L
+            
+            val alarmText = if (hrs >= 24) {
+                val days = hrs / 24
+                val remainingHrs = hrs % 24
+                val dUnit = if (days == 1L) "day" else "days"
+                val hUnit = if (remainingHrs == 1L) "hour" else "hours"
+                "Alarm in $days $dUnit $remainingHrs $hUnit"
+            } else {
+                val adjustedMins = if (hrs == 0L && mins == 0L && diffMillis > 0L) 1L else mins
+                val hUnit = if (hrs == 1L) "hour" else "hours"
+                val mUnit = if (adjustedMins == 1L) "minute" else "minutes"
+                "Alarm in $hrs $hUnit $adjustedMins $mUnit"
+            }
+            Pair(alarmText, Icons.Default.Alarm)
+        } else {
+            Pair("No upcoming alarms", Icons.Default.AlarmOff)
+        }
+    }
+
     // Request permissions for Notifications automatically on Android 13+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
@@ -360,7 +409,7 @@ fun MedRemAppContent(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 var showMenu by remember { mutableStateOf(false) }
@@ -470,24 +519,26 @@ fun MedRemAppContent(
                     }
                 }
 
-                // Title centered
+                // Title centered with next alarm countdown
                 Row(
                     modifier = Modifier.weight(1f),
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = if (activeLabelMode == "MEDICATION") Icons.Default.MedicalServices else Icons.Default.Category,
-                        contentDescription = "Active Label Mode",
+                        imageVector = nextAlarmIcon,
+                        contentDescription = "Next Alarm",
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(24.dp).padding(end = 8.dp)
                     )
                     Text(
-                        text = "MedRem",
-                        fontSize = 24.sp,
+                        text = nextAlarmText,
+                        fontSize = 17.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary,
                         textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.testTag("app_title")
                     )
                 }
@@ -864,7 +915,7 @@ fun MedRemAppContent(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         var showMenu by remember { mutableStateOf(false) }
@@ -979,17 +1030,19 @@ fun MedRemAppContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Icon(
-                                imageVector = if (activeLabelMode == "MEDICATION") Icons.Default.MedicalServices else Icons.Default.Category,
-                                contentDescription = "Active Label Mode",
+                                imageVector = nextAlarmIcon,
+                                contentDescription = "Next Alarm",
                                 tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(24.dp).padding(end = 8.dp)
                             )
                             Text(
-                                text = "MedRem",
-                                fontSize = 24.sp,
+                                text = nextAlarmText,
+                                fontSize = 17.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.primary,
                                 textAlign = TextAlign.Center,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.testTag("app_title")
                             )
                         }
@@ -1425,6 +1478,7 @@ fun MedRemAppContent(
         val editingMed = medicationToEdit
         AddEditMedicationScheduleDialog(
             medication = editingMed,
+            existingMedications = allMedications,
             profiles = familyMembers,
             initialSelectedProfileId = selectedProfileId,
             profileSing = profileSing,
@@ -2526,6 +2580,7 @@ fun AlertStartingTimeUI(
                     }
                 },
                 label = { Text(stringResource(R.string.hour_label)) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier
                     .weight(1f)
                     .testTag("time_hour_input")
@@ -2554,6 +2609,7 @@ fun AlertStartingTimeUI(
                     }
                 },
                 label = { Text(stringResource(R.string.minute_label)) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 modifier = Modifier
                     .weight(1f)
                     .testTag("time_minute_input")
@@ -2852,6 +2908,7 @@ fun NextAlarmPreviewCard(
 @Composable
 fun AddEditMedicationScheduleDialog(
     medication: Medication?,
+    existingMedications: List<Medication> = emptyList(),
     profiles: List<FamilyMember>,
     initialSelectedProfileId: Long = 0L,
     profileSing: String,
@@ -3287,7 +3344,16 @@ fun AddEditMedicationScheduleDialog(
                         value = name,
                         onValueChange = {
                             name = it
-                            if (it.isNotBlank()) nameError = null
+                            val trimmed = it.trim()
+                            if (trimmed.isNotBlank()) {
+                                val isDup = existingMedications.any { other ->
+                                    other.id != (medication?.id ?: 0L) &&
+                                    other.name.trim().equals(trimmed, ignoreCase = true)
+                                }
+                                nameError = if (isDup) "$medicationSing name already exists" else null
+                            } else {
+                                nameError = null
+                            }
                         },
                         label = { Text("$medicationSing Name") },
                         modifier = Modifier
@@ -3762,7 +3828,8 @@ fun AddEditMedicationScheduleDialog(
                         OutlinedButton(
                             onClick = {
                                 var hasError = false
-                                if (name.trim().isEmpty()) {
+                                val trimmedName = name.trim()
+                                if (trimmedName.isEmpty()) {
                                     nameError = "$medicationSing name is required"
                                     hasError = true
                                     coroutineScope.launch {
@@ -3771,6 +3838,23 @@ fun AddEditMedicationScheduleDialog(
                                             nameFocusRequester.requestFocus()
                                         } catch (e: Exception) {
                                             // Ignore if focus requester is not yet attached
+                                        }
+                                    }
+                                } else {
+                                    val isDuplicate = existingMedications.any { other ->
+                                        other.id != (medication?.id ?: 0L) &&
+                                        other.name.trim().equals(trimmedName, ignoreCase = true)
+                                    }
+                                    if (isDuplicate) {
+                                        nameError = "$medicationSing name already exists"
+                                        hasError = true
+                                        coroutineScope.launch {
+                                            listState.animateScrollToItem(2)
+                                            try {
+                                                nameFocusRequester.requestFocus()
+                                            } catch (e: Exception) {
+                                                // Ignore if focus requester is not yet attached
+                                            }
                                         }
                                     }
                                 }

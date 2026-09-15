@@ -302,6 +302,21 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
         recordInHistory: Boolean = true
     ) {
         viewModelScope.launch {
+            val trimmedName = name.trim()
+            if (id == 0L) {
+                val duplicate = allMedications.value.find { it.name.trim().equals(trimmedName, ignoreCase = true) }
+                if (duplicate != null) {
+                    android.util.Log.w("MedicationViewModel", "Cannot add duplicate medication name: $name")
+                    return@launch
+                }
+            } else {
+                val duplicate = allMedications.value.find { it.id != id && it.name.trim().equals(trimmedName, ignoreCase = true) }
+                if (duplicate != null) {
+                    android.util.Log.w("MedicationViewModel", "Cannot update medication with duplicate name: $name")
+                    return@launch
+                }
+            }
+
             var lastLogged = 0L
             if (id != 0L) {
                 repository.getMedicationById(id)?.let {
@@ -630,13 +645,9 @@ class MedicationViewModel(application: Application) : AndroidViewModel(applicati
 
                     val mappedFamilyMemberId = profileIdMap[origFamilyMemberId] ?: defaultFamilyId
 
-                    // Check if identical medication schedule already exists for this member to avoid spamming duplicates
+                    // Check if medication with same name already exists to avoid repeat item/medication name
                     val duplicate = allMedications.value.find {
-                        it.familyMemberId == mappedFamilyMemberId &&
-                                it.name.equals(name, ignoreCase = true) &&
-                                it.dosage.equals(dosage, ignoreCase = true) &&
-                                it.scheduleType == scheduleType &&
-                                it.startTime == startTime
+                        it.name.trim().equals(name, ignoreCase = true)
                     }
 
                     if (duplicate == null) {
